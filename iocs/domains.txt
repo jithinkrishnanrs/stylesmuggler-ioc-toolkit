@@ -1,0 +1,16 @@
+# StyleSmuggler C2 / malware-download domains
+# Source: Sansec advisory, 2026-09-05.
+# Format: domain[:port]  # role
+
+247.cdnflare.xyz            # malware download host (AAAA: 2a06:98c1:3120::2, 2a06:98c1:3121::2)
+windwsecurity.run:443       # remote shell, WebSocket over TLS (TCP)
+ntp.timesysnc.net:123       # C2, custom NTP-shaped traffic (UDP)
+time.microsft.run:123       # C2, custom NTP-shaped traffic (UDP) — note typosquat of "microsoft"
+pool.microsft.studio:123    # C2, custom NTP-shaped traffic (UDP) — note typosquat of "microsoft"
+
+# CAUTION observed by community responders: two independent packet captures (>200MB
+# each) taken while the implant was actively running showed ZERO packets to the
+# published C2/download hosts above. One infection instead made 28 simultaneous
+# connections to the store's OWN local Redis (127.0.0.1:6379) and no external traffic
+# at all. Do not treat a clean capture against this domain list as proof of a clean
+# host — always run the full filesystem/process/cron checks too.

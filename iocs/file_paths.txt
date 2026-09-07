@@ -1,0 +1,53 @@
+# StyleSmuggler — filesystem, process, and cron indicators
+# Sources: Sansec advisory + community IR on 2 confirmed live infections, 2026-09-05.
+
+## Implant binary and lock files (under the SITE USER's home directory, not root's,
+## and not the webroot — check every account on shared hosting)
+~/.local/share/.gvfsd/gvfsd-user
+~/.local/share/.gvfsd/.gvfsd_<8hex>.lock
+/tmp/.gvfsd_<8hex>.lock          # second lock location, outside the home dir
+/tmp/.kw_<random><random>
+
+## Cron persistence — written DIRECTLY to the spool file, not via `crontab`, so it does
+## not generate the REPLACE line syslog normally logs on a crontab change.
+## File: /var/spool/cron/crontabs/<user>
+*/5 * * * * exec <home>/.local/share/.gvfsd/gvfsd-user
+*/5 * * * * exec /tmp/.kw_                              # variant seen pointing at /tmp directly
+# Observed duplicated up to 1728 times in one crontab; self-restores within ~1 second of
+# manual removal if the process/binary itself hasn't been cleaned first. Clean order:
+# persistence -> process -> binary -> re-check persistence after a full cron cycle.
+
+## Process masquerade
+[kworker/u:8:0]     # owned by a NON-ROOT uid — this is the tell, the name alone is a legitimate kernel thread name
+
+## Poisoned files (check BOTH — community responders' two confirmed infections both came
+## through system.log, which the original advisory's own quick-check command does not cover)
+var/log/system.log       # poisoned via an invalid store code, logged verbatim by Magento
+var/report/<hash>        # the location the original advisory's quick-check targets
+
+## Request signature (exploit delivery, as observed in the wild)
+POST /graphql?styles[...]=                                                  # percent-encoded in the wild
+POST /paypal/transparent/response/?<?=eval(base64_decode('...              # published by Sansec
+# Also observed riding in the User-Agent header rather than the URL on requests to:
+GET  /customer/section/load/?sections=customer&force_new_section_timestamp=true
+
+## Trigger header (value is regenerated per request — match the SHAPE, not the literal value)
+X-TRACE-<10 hex>     # e.g. X-TRACE-1713CB9C2F   — observed morning of 2026-09-05
+X-<12 hex>           # e.g. X-52988DAECE51, X-4427457CBAC9 — observed afternoon of 2026-09-05, TRACE dropped entirely
+# A detection pinned to "X-TRACE-" alone goes blind against the second family. This
+# changed once within 24 hours of disclosure; assume it can change again.
+
+## Response marker (proof of execution, not just that the payload was sent)
+MG<20 hex>::<base64 result>::/MG<20 hex>
+# e.g. MG8a5ee8fd94fdb9fc6b50::...::/MG8a5ee8fd94fdb9fc6b50 — hex differs per request, match the shape
+
+## User agents on the exploit requests (never a real browser)
+python-requests 2.15.0      # first wave — note the SPACE, not a slash
+python-requests/2.32.4      # second wave
+# Version changed between waves. Treat "python-requests on POST /graphql with a styles[]
+# argument" as the signal, not any specific version string.
+
+## Network behavior anomaly (not file/process, but worth flagging alongside these)
+# One confirmed infection made a local Redis connection burst instead of any outbound
+# traffic: ~28 simultaneous connections to 127.0.0.1:6379, reading Magento session data
+# directly out of the store's own Redis instance.

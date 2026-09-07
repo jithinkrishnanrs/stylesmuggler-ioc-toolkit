@@ -1,0 +1,12 @@
+# Scan output / evidence — never commit real findings from your own infrastructure
+report.json
+*.report.json
+evidence/
+*.stylesmuggler_scan_*.bin
+*.stylesmuggler-backup.*
+
+# OS / editor cruft
+.DS_Store
+*.swp
+__pycache__/
+*.pyc

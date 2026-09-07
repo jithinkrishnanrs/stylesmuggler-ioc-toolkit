@@ -1,0 +1,14 @@
+# StyleSmuggler implant — SHA-256 hashes
+#
+# Format: <sha256>  <label>
+# Source: Sansec advisory (sample hash) + community IR on two independently confirmed
+# live infections, 2026-09-05. See docs/VULNERABILITY.md for why there are three hashes,
+# not two: on one host, the binary running in memory differed from the binary on disk.
+# ALWAYS also hash the running /proc/<pid>/exe, not only files at rest — see
+# scripts/stylesmuggler_scan.sh.
+#
+# Binary profile: ~1.9 MB, stripped, statically linked Rust, built for x86-64 and arm64.
+
+e315687a1dfe61ef4a5a5642214db6d3b2b05d81391285eebc2af664641a26a7  gvfsd-user (Sansec published sample)
+8334b434fa3fe9f59cebe9609b11e0b1fd19d10212c45c705adec1902a1d06ef  gvfsd-user (on-disk, both community-confirmed infections)
+251fabd50d7b18a8b5e1b3ef5d64e7198c17244778f6461fb1ab07f6169bf220  gvfsd-user (in-memory /proc/<pid>/exe variant, differs from on-disk sample above)

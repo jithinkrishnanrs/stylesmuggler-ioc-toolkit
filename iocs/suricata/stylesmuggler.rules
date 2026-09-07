@@ -1,0 +1,41 @@
+# StyleSmuggler — Suricata/Snort-compatible network IDS rules
+# Source: Sansec advisory 2026-09-05 + community IR. See ../../docs/VULNERABILITY.md.
+#
+# Adjust $HOME_NET / $EXTERNAL_NET and SIDs (7000000-7000099 is an arbitrary local range
+# — pick a range that doesn't collide with your existing local.rules) to your environment
+# before deploying. These are a starting point, not a certified/maintained ruleset.
+#
+# REMINDER: at least one confirmed StyleSmuggler infection made NO outbound network
+# traffic at all (it read Magento session data straight out of local Redis instead).
+# These network rules will not catch that case — pair them with the host-based scanner.
+
+# --- C2 / malware download infrastructure -----------------------------------------
+
+alert tls $HOME_NET any -> 99.84.67.186 443 (msg:"STYLESMUGGLER C2 TLS WebSocket to known Magento implant C2"; flow:to_server,established; sid:7000001; rev:1; classtype:trojan-activity; reference:url,sansec.io/research/stylesmuggler;)
+
+alert dns $HOME_NET any -> any any (msg:"STYLESMUGGLER DNS lookup for malware download host"; dns.query; content:"247.cdnflare.xyz"; nocase; sid:7000002; rev:1; classtype:trojan-activity; reference:url,sansec.io/research/stylesmuggler;)
+
+alert tls $HOME_NET any -> $EXTERNAL_NET 443 (msg:"STYLESMUGGLER TLS SNI to remote-shell C2 (windwsecurity.run)"; tls.sni; content:"windwsecurity.run"; nocase; sid:7000003; rev:1; classtype:trojan-activity;)
+
+alert udp $HOME_NET any -> any 123 (msg:"STYLESMUGGLER possible NTP-shaped C2 to typosquat host (timesysnc/microsft)"; dns.query; content:"timesysnc.net"; nocase; sid:7000004; rev:1; classtype:trojan-activity;)
+alert dns $HOME_NET any -> any any (msg:"STYLESMUGGLER DNS lookup for NTP-shaped C2 domain (typosquat)"; dns.query; content:"microsft.run"; nocase; sid:7000005; rev:1; classtype:trojan-activity;)
+alert dns $HOME_NET any -> any any (msg:"STYLESMUGGLER DNS lookup for NTP-shaped C2 domain (typosquat)"; dns.query; content:"microsft.studio"; nocase; sid:7000006; rev:1; classtype:trojan-activity;)
+
+# --- Confirmed attacker source addresses (bulk/infra sources — see iocs/ips.txt for
+#     which addresses are safe to block vs. which are shared residential proxy exits) --
+
+alert http any 88.216.72.181 -> $HOME_NET any (msg:"STYLESMUGGLER known exploit source IP (Sansec-published)"; sid:7000010; rev:1; classtype:web-application-attack;)
+alert http any 5.181.86.133 -> $HOME_NET any (msg:"STYLESMUGGLER known exploit source IP (CloudVPS, bulk)"; sid:7000011; rev:1; classtype:web-application-attack;)
+alert http any 91.238.181.19 -> $HOME_NET any (msg:"STYLESMUGGLER known exploit source IP (AS49434, second wave)"; sid:7000012; rev:1; classtype:web-application-attack;)
+
+# --- Exploit request shape (GraphQL styles[] abuse, trigger header, response marker) --
+
+alert http $EXTERNAL_NET any -> $HOME_NET any (msg:"STYLESMUGGLER exploit attempt - styles[] on /graphql"; flow:to_server,established; http.method; content:"POST"; http.uri; content:"/graphql"; content:"styles"; distance:0; sid:7000020; rev:1; classtype:web-application-attack; reference:url,sansec.io/research/stylesmuggler;)
+
+alert http $EXTERNAL_NET any -> $HOME_NET any (msg:"STYLESMUGGLER trigger header family 1 (X-TRACE-<hex>)"; flow:to_server,established; http.header_names; content:"X-TRACE-"; pcre:"/X-TRACE-[0-9A-Fa-f]{10}/H"; sid:7000021; rev:1; classtype:web-application-attack;)
+
+alert http $EXTERNAL_NET any -> $HOME_NET any (msg:"STYLESMUGGLER trigger header family 2 (X-<12hex>, TRACE dropped)"; flow:to_server,established; pcre:"/^X-[0-9A-Fa-f]{12}\x3a/Hm"; sid:7000022; rev:1; classtype:web-application-attack;)
+
+alert http $HOME_NET any -> $EXTERNAL_NET any (msg:"STYLESMUGGLER response execution marker (MG<hex>::...::/MG<hex>)"; flow:to_client,established; file.data; pcre:"/MG[0-9a-f]{16,}::.{0,4096}::\/MG[0-9a-f]{16,}/"; sid:7000023; rev:1; classtype:trojan-activity;)
+
+alert http $EXTERNAL_NET any -> $HOME_NET any (msg:"STYLESMUGGLER known scripted attacker user-agent on /graphql"; flow:to_server,established; http.user_agent; content:"python-requests"; http.uri; content:"/graphql"; sid:7000024; rev:1; classtype:web-application-attack;)
