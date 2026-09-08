@@ -11,15 +11,28 @@
 
 # --- C2 / malware download infrastructure -----------------------------------------
 
-alert tls $HOME_NET any -> 99.84.67.186 443 (msg:"STYLESMUGGLER C2 TLS WebSocket to known Magento implant C2"; flow:to_server,established; sid:7000001; rev:1; classtype:trojan-activity; reference:url,sansec.io/research/stylesmuggler;)
+alert tls $HOME_NET any -> 99.84.67.186 443 (msg:"STYLESMUGGLER C2 TLS WebSocket to known Magento implant C2"; flow:to_server,established; sid:7000001; rev:1; classtype:trojan-activity; reference:url,sansec.io/research/stylesmuggler-0day;)
 
-alert dns $HOME_NET any -> any any (msg:"STYLESMUGGLER DNS lookup for malware download host"; dns.query; content:"247.cdnflare.xyz"; nocase; sid:7000002; rev:1; classtype:trojan-activity; reference:url,sansec.io/research/stylesmuggler;)
+alert dns $HOME_NET any -> any any (msg:"STYLESMUGGLER DNS lookup for malware download host"; dns.query; content:"247.cdnflare.xyz"; nocase; sid:7000002; rev:1; classtype:trojan-activity; reference:url,sansec.io/research/stylesmuggler-0day;)
 
 alert tls $HOME_NET any -> $EXTERNAL_NET 443 (msg:"STYLESMUGGLER TLS SNI to remote-shell C2 (windwsecurity.run)"; tls.sni; content:"windwsecurity.run"; nocase; sid:7000003; rev:1; classtype:trojan-activity;)
 
 alert udp $HOME_NET any -> any 123 (msg:"STYLESMUGGLER possible NTP-shaped C2 to typosquat host (timesysnc/microsft)"; dns.query; content:"timesysnc.net"; nocase; sid:7000004; rev:1; classtype:trojan-activity;)
 alert dns $HOME_NET any -> any any (msg:"STYLESMUGGLER DNS lookup for NTP-shaped C2 domain (typosquat)"; dns.query; content:"microsft.run"; nocase; sid:7000005; rev:1; classtype:trojan-activity;)
 alert dns $HOME_NET any -> any any (msg:"STYLESMUGGLER DNS lookup for NTP-shaped C2 domain (typosquat)"; dns.query; content:"microsft.studio"; nocase; sid:7000006; rev:1; classtype:trojan-activity;)
+alert dns $HOME_NET any -> any any (msg:"STYLESMUGGLER DNS lookup for malware download host (209.141.43.95 alias)"; dns.query; content:"cdnflare.xyz"; nocase; sid:7000007; rev:1; classtype:trojan-activity;)
+alert ip $HOME_NET any -> 209.141.43.95 any (msg:"STYLESMUGGLER connection to known malware download host"; sid:7000008; rev:1; classtype:trojan-activity;)
+
+# --- fc-cache / chronyd build C2 (NTP-shaped UDP/123 beaconing, first seen 2026-09-06) --
+
+alert dns $HOME_NET any -> any any (msg:"STYLESMUGGLER DNS lookup for fc-cache/chronyd build C2 (ntp.timesync.to)"; dns.query; content:"ntp.timesync.to"; nocase; sid:7000030; rev:1; classtype:trojan-activity; reference:url,sansec.io/research/stylesmuggler-0day;)
+alert dns $HOME_NET any -> any any (msg:"STYLESMUGGLER DNS lookup for fc-cache/chronyd build C2 fallback (ntp.synctime.to)"; dns.query; content:"ntp.synctime.to"; nocase; sid:7000031; rev:1; classtype:trojan-activity;)
+alert dns $HOME_NET any -> any any (msg:"STYLESMUGGLER DNS lookup for fc-cache/chronyd build C2 fallback (ntp.syncstime.to)"; dns.query; content:"ntp.syncstime.to"; nocase; sid:7000032; rev:1; classtype:trojan-activity;)
+# Behavioral fallback: flag unusually large/frequent UDP/123 packets to non-standard NTP
+# servers. This is noisy — tune to your environment's actual NTP peers, or disable if
+# you can't maintain an allowlist. Genuine NTP payloads are typically 48 bytes; this
+# implant's beacons carry a larger chunked MessagePack payload past the first 4 bytes.
+# alert udp $HOME_NET any -> !$NTP_SERVERS 123 (msg:"STYLESMUGGLER possible NTP-shaped C2 - oversized NTP-port packet to non-allowlisted host"; dsize:>60; sid:7000033; rev:1; classtype:trojan-activity;)
 
 # --- Confirmed attacker source addresses (bulk/infra sources — see iocs/ips.txt for
 #     which addresses are safe to block vs. which are shared residential proxy exits) --
@@ -30,7 +43,7 @@ alert http any 91.238.181.19 -> $HOME_NET any (msg:"STYLESMUGGLER known exploit 
 
 # --- Exploit request shape (GraphQL styles[] abuse, trigger header, response marker) --
 
-alert http $EXTERNAL_NET any -> $HOME_NET any (msg:"STYLESMUGGLER exploit attempt - styles[] on /graphql"; flow:to_server,established; http.method; content:"POST"; http.uri; content:"/graphql"; content:"styles"; distance:0; sid:7000020; rev:1; classtype:web-application-attack; reference:url,sansec.io/research/stylesmuggler;)
+alert http $EXTERNAL_NET any -> $HOME_NET any (msg:"STYLESMUGGLER exploit attempt - styles[] on /graphql"; flow:to_server,established; http.method; content:"POST"; http.uri; content:"/graphql"; content:"styles"; distance:0; sid:7000020; rev:1; classtype:web-application-attack; reference:url,sansec.io/research/stylesmuggler-0day;)
 
 alert http $EXTERNAL_NET any -> $HOME_NET any (msg:"STYLESMUGGLER trigger header family 1 (X-TRACE-<hex>)"; flow:to_server,established; http.header_names; content:"X-TRACE-"; pcre:"/X-TRACE-[0-9A-Fa-f]{10}/H"; sid:7000021; rev:1; classtype:web-application-attack;)
 

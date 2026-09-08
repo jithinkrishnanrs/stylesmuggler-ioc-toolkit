@@ -2,12 +2,12 @@
 
 | File | Contents |
 |---|---|
-| [`hashes.sha256`](hashes.sha256) | SHA-256 of the implant binary — 3 hashes, including an in-memory variant that differs from the on-disk sample |
-| [`domains.txt`](domains.txt) | C2 / malware-download domains |
-| [`ips.txt`](ips.txt) | C2 IP, confirmed attacker source addresses, and a residential-proxy pool list (do not blanket-block the latter) |
-| [`file_paths.txt`](file_paths.txt) | Filesystem persistence, cron entries, process masquerade, poisoned-log locations, request/response signatures |
-| [`yara/stylesmuggler.yar`](yara/stylesmuggler.yar) | YARA rules: known hashes, string heuristics, response-marker regex |
-| [`suricata/stylesmuggler.rules`](suricata/stylesmuggler.rules) | Network IDS rules for C2 traffic and exploit request shapes |
+| [`hashes.sha256`](hashes.sha256) | SHA-256 of the implant binary across all three known builds (`gvfsd-user`, `fc-cache`/`chronyd`) — 6 hashes total, including an in-memory variant that differs from the on-disk sample |
+| [`domains.txt`](domains.txt) | C2 / malware-download domains, including the NTP-shaped `fc-cache`/`chronyd` build C2 |
+| [`ips.txt`](ips.txt) | C2/download IPs, confirmed attacker source addresses, and a residential-proxy pool list (do not blanket-block the latter) |
+| [`file_paths.txt`](file_paths.txt) | Filesystem persistence, cron entries, process masquerade (all 3 builds), poisoned-log locations, request/response signatures, second delivery vector, secondary/post-exploitation indicators |
+| [`yara/stylesmuggler.yar`](yara/stylesmuggler.yar) | YARA rules: known hashes (all builds), string heuristics, response-marker regex |
+| [`suricata/stylesmuggler.rules`](suricata/stylesmuggler.rules) | Network IDS rules for C2 traffic (including NTP-shaped UDP/123) and exploit request shapes |
 
 All of the above are consumed automatically by `../scripts/stylesmuggler_scan.sh` and
 `../scripts/stylesmuggler_scan.py` where applicable (currently: `hashes.sha256`).

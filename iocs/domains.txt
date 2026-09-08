@@ -1,16 +1,27 @@
 # StyleSmuggler C2 / malware-download domains
-# Source: Sansec advisory, 2026-09-05.
+# Source: Sansec advisory, updated through 2026-09-07. See docs/VULNERABILITY.md.
 # Format: domain[:port]  # role
 
-247.cdnflare.xyz            # malware download host (AAAA: 2a06:98c1:3120::2, 2a06:98c1:3121::2)
+## gvfsd-user build C2/download infrastructure
+247.cdnflare.xyz            # malware download host (AAAA: 2a06:98c1:3120::2, 2a06:98c1:3121::2); also served from 209.141.43.95/files/ — see ips.txt
 windwsecurity.run:443       # remote shell, WebSocket over TLS (TCP)
 ntp.timesysnc.net:123       # C2, custom NTP-shaped traffic (UDP)
 time.microsft.run:123       # C2, custom NTP-shaped traffic (UDP) — note typosquat of "microsoft"
 pool.microsft.studio:123    # C2, custom NTP-shaped traffic (UDP) — note typosquat of "microsoft"
 
+## fc-cache / chronyd build C2 (first seen 2026-09-06, NTP-shaped UDP/123 beaconing —
+## only the first 4 bytes of each packet are genuine NTP; the rest is a chunked
+## MessagePack record with agent ID, hostname, username, OS/mem/disk info, root status,
+## and implant version, e.g. "2.1.4")
+ntp.timesync.to:123         # primary C2 for the fc-cache/chronyd build
+ntp.synctime.to:123         # fallback C2
+ntp.syncstime.to:123        # fallback C2
+
 # CAUTION observed by community responders: two independent packet captures (>200MB
-# each) taken while the implant was actively running showed ZERO packets to the
-# published C2/download hosts above. One infection instead made 28 simultaneous
+# each) taken while the gvfsd-user implant was actively running showed ZERO packets to
+# the published C2/download hosts above. One infection instead made 28 simultaneous
 # connections to the store's OWN local Redis (127.0.0.1:6379) and no external traffic
-# at all. Do not treat a clean capture against this domain list as proof of a clean
-# host — always run the full filesystem/process/cron checks too.
+# at all. Separately, the fc-cache/chronyd build's C2 rides on UDP/123 disguised as NTP
+# traffic — a port most egress filtering treats as harmless and won't alert on. Do not
+# treat a clean capture against this domain list as proof of a clean host — always run
+# the full filesystem/process/cron checks too.

@@ -3,8 +3,9 @@
 # independently confirmed live infections and a third targeted-but-unsuccessful store,
 # all 2026-09-05. See notes below before you bulk-block anything.
 
-## Command and control
-99.84.67.186:443        # C2, WebSocket over TLS (published by Sansec)
+## Command and control / malware download
+99.84.67.186:443        # C2, WebSocket over TLS (published by Sansec) — gvfsd-user build
+209.141.43.95            # malware download host, serves the same payloads as 247.cdnflare.xyz over /files/
 
 ## Confirmed attacker / bulk exploit-request source addresses
 88.216.72.181            # Sansec-published source, seen at multiple victims (~45 requests, one store)

@@ -22,6 +22,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -34,7 +35,11 @@ IOC_DIR = SCRIPT_DIR.parent / "iocs"
 TRIGGER_HEADER_RE = re.compile(r"X[_-](TRACE[_-])?[0-9A-Fa-f]{10,12}")
 RESPONSE_MARKER_RE = re.compile(r"MG[0-9a-f]{16,}::")
 PHP_TAG_RE = re.compile(r"<\?php|<\?=")
-C2_IPS = ["99.84.67.186"]
+C2_IPS = ["99.84.67.186", "209.141.43.95"]
+NTP_C2_DOMAINS = ["ntp.timesync.to", "ntp.synctime.to", "ntp.syncstime.to"]
+CRON_PATTERN = re.compile(r"gvfsd|\.kw_|fc-cache|\.fc_|chronyd|\.chrony-")
+SYSTEM_PATH_PREFIXES = ("/usr", "/sbin", "/bin", "/lib")
+STANDARD_TIME_USERS = {"root", "chrony", "_chrony", "systemd-timesync"}
 
 
 @dataclass
@@ -96,23 +101,41 @@ def check_filesystem(report: ScanReport, home_dirs):
     candidates = list(home_dirs) + ["/root"]
     for h in candidates:
         base = Path(h)
+        # gvfsd-user build (first seen 2026-09-04)
         implant = base / ".local/share/.gvfsd/gvfsd-user"
         if implant.exists():
-            report.hit("filesystem", f"Implant binary present: {implant}")
+            report.hit("filesystem", f"Implant binary present (gvfsd-user build): {implant}")
         for lock in glob.glob(str(base / ".local/share/.gvfsd/.gvfsd_*.lock")):
-            report.hit("filesystem", f"Implant lock file: {lock}")
+            report.hit("filesystem", f"Implant lock file (gvfsd-user build): {lock}")
+        # fc-cache build (first seen 2026-09-06)
+        fc_implant = base / ".cache/fontconfig/fc-cache"
+        if fc_implant.exists():
+            report.hit(
+                "filesystem",
+                f"Implant binary present (fc-cache build): {fc_implant} — verify against "
+                f"your distro's real fc-cache path/hash before assuming compromise",
+            )
     for lock in glob.glob("/tmp/.gvfsd_*.lock"):
-        report.hit("filesystem", f"Implant lock file (second location): {lock}")
+        report.hit("filesystem", f"Implant lock file (second location, gvfsd-user build): {lock}")
     for kw in glob.glob("/tmp/.kw_*"):
-        report.hit("filesystem", f"Implant artefact: {kw}")
+        report.hit("filesystem", f"Implant artefact (gvfsd-user build): {kw}")
+    for lock in glob.glob("/tmp/.fc_*.lock"):
+        report.hit("filesystem", f"Implant lock file (fc-cache build): {lock}")
+    for chrony_dir in glob.glob("/tmp/.chrony-*"):
+        chronyd_bin = Path(chrony_dir) / "chronyd"
+        if chronyd_bin.exists():
+            report.hit("filesystem", f"Implant binary present (chronyd build): {chronyd_bin}")
     if report.hit_count == before:
-        report.ok("No known persistence file paths found under checked home directories or /tmp.")
+        report.ok(
+            "No known persistence file paths found under checked home directories or /tmp "
+            "(checked gvfsd-user, fc-cache, and chronyd build locations)."
+        )
 
 
 def check_cron(report: ScanReport):
     section("Cron persistence")
     before = report.hit_count
-    pattern = re.compile(r"gvfsd|\.kw_")
+    pattern = CRON_PATTERN
     spool_dir = Path("/var/spool/cron/crontabs")
     checked_any = False
     if os.geteuid() == 0 and spool_dir.is_dir():
@@ -145,7 +168,7 @@ def check_cron(report: ScanReport):
 
 
 def check_processes(report: ScanReport):
-    section("Process masquerade ([kworker/u:8:0] owned by non-root)")
+    section("Process masquerade ([kworker/u:8:0], fc-cache, or chronyd)")
     suspects = []
     try:
         out = subprocess.run(
@@ -160,19 +183,50 @@ def check_processes(report: ScanReport):
         if len(parts) < 3:
             continue
         puser, ppid, pcomm = parts[0], parts[1], parts[2]
-        if "kworker/u:8:0" not in line:
+
+        if "kworker/u:8:0" in line:
+            if puser != "root":
+                report.hit(
+                    "process",
+                    f"Process '{pcomm}' (PID {ppid}) matches known masquerade name "
+                    f"but is owned by non-root user '{puser}'",
+                )
+                suspects.append(ppid)
+            else:
+                report.info("process", f"Found {pcomm} (PID {ppid}) owned by root — likely genuine, not flagged")
             continue
-        if puser != "root":
-            report.hit(
-                "process",
-                f"Process '{pcomm}' (PID {ppid}) matches known masquerade name "
-                f"but is owned by non-root user '{puser}'",
-            )
-            suspects.append(ppid)
-        else:
-            report.info("process", f"Found {pcomm} (PID {ppid}) owned by root — likely genuine, not flagged")
+
+        if pcomm in ("fc-cache", "chronyd"):
+            real_exe = None
+            exe_link = Path(f"/proc/{ppid}/exe")
+            if exe_link.exists():
+                try:
+                    real_exe = str(exe_link.resolve())
+                except (OSError, RuntimeError):
+                    real_exe = None
+            if real_exe and not real_exe.startswith(SYSTEM_PATH_PREFIXES):
+                report.hit(
+                    "process",
+                    f"Process '{pcomm}' (PID {ppid}, user '{puser}') running from "
+                    f"non-system path {real_exe} — matches fc-cache/chronyd build masquerade",
+                )
+                suspects.append(ppid)
+            elif puser not in STANDARD_TIME_USERS:
+                report.hit(
+                    "process",
+                    f"Process '{pcomm}' (PID {ppid}) owned by unexpected user '{puser}' "
+                    f"(not root or a standard time-sync/fontconfig account)",
+                )
+                suspects.append(ppid)
+            else:
+                report.info(
+                    "process",
+                    f"Found {pcomm} (PID {ppid}) owned by '{puser}', exe resolves under a "
+                    f"system path — likely genuine, not flagged",
+                )
+
     if not suspects:
-        report.ok("No non-root [kworker/u:8:0]-named processes found.")
+        report.ok("No suspicious [kworker/u:8:0], fc-cache, or chronyd processes found.")
     return suspects
 
 
@@ -251,16 +305,41 @@ def check_poisoned_files(report: ScanReport, magento_root):
 def check_network(report: ScanReport):
     section("Network")
     try:
-        out = subprocess.run(["ss", "-tn"], capture_output=True, text=True, timeout=5)
+        out_tcp = subprocess.run(["ss", "-tn"], capture_output=True, text=True, timeout=5)
     except (FileNotFoundError, subprocess.SubprocessError):
         report.info("network", "'ss' not available — skipping live network check")
         return
 
     for ip in C2_IPS:
-        if ip in out.stdout:
-            report.hit("network", f"Active connection to known C2 address {ip}")
+        if ip in out_tcp.stdout:
+            report.hit("network", f"Active connection to known C2/download address {ip}")
 
-    redis_conns = out.stdout.count("127.0.0.1:6379")
+    # fc-cache/chronyd build beacons over UDP/123 disguised as NTP traffic
+    try:
+        out_udp = subprocess.run(["ss", "-un"], capture_output=True, text=True, timeout=5)
+        udp123_count = out_udp.stdout.count(":123 ")
+        if udp123_count:
+            report.info(
+                "network",
+                f"Found {udp123_count} active UDP/123 (NTP) socket(s) — verify these point "
+                f"at your real NTP servers, not {', '.join(NTP_C2_DOMAINS)}. The "
+                f"fc-cache/chronyd build's beacon looks like NTP traffic to casual inspection.",
+            )
+        for domain in NTP_C2_DOMAINS:
+            try:
+                resolved = socket.gethostbyname(domain)
+                if resolved in out_udp.stdout:
+                    report.hit(
+                        "network",
+                        f"Active UDP connection to resolved IP of known NTP-shaped C2 domain "
+                        f"{domain} ({resolved})",
+                    )
+            except OSError:
+                pass
+    except (FileNotFoundError, subprocess.SubprocessError):
+        pass
+
+    redis_conns = out_tcp.stdout.count("127.0.0.1:6379")
     if redis_conns > 10:
         report.hit(
             "network",
@@ -272,7 +351,8 @@ def check_network(report: ScanReport):
 
     print(
         "\n[reminder] At least one confirmed infection made no outbound network traffic "
-        "at all. A clean network check alone does NOT mean the host is clean."
+        "at all, and a newer build's beaconing is deliberately shaped to look like ordinary "
+        "NTP traffic on UDP/123. A clean network check alone does NOT mean the host is clean."
     )
 
 
@@ -294,8 +374,8 @@ def main():
         home_dirs.extend(glob.glob("/home/*"))
 
     print("StyleSmuggler compromise scanner")
-    print("Built from: Sansec advisory 2026-09-05 + community incident response, same date.")
-    print("Reference:  https://sansec.io/research/stylesmuggler")
+    print("Built from: Sansec advisory 2026-09-05, updated through 2026-09-07 + community IR.")
+    print("Reference:  https://sansec.io/research/stylesmuggler-0day")
     print("This is DETECTION ONLY. See docs/INCIDENT_RESPONSE.md before acting on findings.\n")
 
     if os.geteuid() != 0:
@@ -323,7 +403,7 @@ def main():
     if args.json:
         payload = {
             "scanner": "stylesmuggler_scan.py",
-            "reference": "https://sansec.io/research/stylesmuggler",
+            "reference": "https://sansec.io/research/stylesmuggler-0day",
             "hit_count": report.hit_count,
             "findings": [asdict(f) for f in report.findings],
         }

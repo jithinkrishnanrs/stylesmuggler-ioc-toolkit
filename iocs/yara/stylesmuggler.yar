@@ -21,26 +21,32 @@ import "hash"
 rule StyleSmuggler_Implant_Hash
 {
     meta:
-        description = "Matches known StyleSmuggler (gvfsd-user) implant hashes"
-        source = "Sansec advisory 2026-09-05 + community IR"
-        reference = "https://sansec.io/research/stylesmuggler"
-        date = "2026-09-06"
+        description = "Matches known StyleSmuggler implant hashes across all observed builds (gvfsd-user, fc-cache, chronyd)"
+        source = "Sansec advisory 2026-09-05, updated through 2026-09-07 + community IR"
+        reference = "https://sansec.io/research/stylesmuggler-0day"
+        date = "2026-09-07"
 
     condition:
+        // gvfsd-user build
         hash.sha256(0, filesize) == "e315687a1dfe61ef4a5a5642214db6d3b2b05d81391285eebc2af664641a26a7" or
         hash.sha256(0, filesize) == "8334b434fa3fe9f59cebe9609b11e0b1fd19d10212c45c705adec1902a1d06ef" or
-        hash.sha256(0, filesize) == "251fabd50d7b18a8b5e1b3ef5d64e7198c17244778f6461fb1ab07f6169bf220"
+        hash.sha256(0, filesize) == "251fabd50d7b18a8b5e1b3ef5d64e7198c17244778f6461fb1ab07f6169bf220" or
+        // fc-cache / chronyd build
+        hash.sha256(0, filesize) == "b79dfdc1eed860e0b76c629d6adfce251db379b0b45a6d728d4ef483f7551420" or
+        hash.sha256(0, filesize) == "4352cabaa451e5a894535fbcc4d46628701303322a13745cb5479d7d0534ae8e" or
+        hash.sha256(0, filesize) == "d2fbf9eb75c495bfea48790d3b228fab0c15a282419c3d3f5e49294c4e1a3e82"
 }
 
 rule StyleSmuggler_Implant_Strings
 {
     meta:
-        description = "Heuristic match on StyleSmuggler C2/persistence strings embedded in a candidate binary"
-        source = "Sansec advisory 2026-09-05 + community IR"
-        reference = "https://sansec.io/research/stylesmuggler"
-        date = "2026-09-06"
+        description = "Heuristic match on StyleSmuggler C2/persistence strings embedded in a candidate binary, across all observed builds"
+        source = "Sansec advisory 2026-09-05, updated through 2026-09-07 + community IR"
+        reference = "https://sansec.io/research/stylesmuggler-0day"
+        date = "2026-09-07"
 
     strings:
+        // gvfsd-user build C2/paths
         $c2_1        = "99.84.67.186"
         $c2_2        = "247.cdnflare.xyz"
         $c2_3        = "windwsecurity.run"
@@ -50,13 +56,22 @@ rule StyleSmuggler_Implant_Strings
         $path_1      = ".gvfsd"
         $path_2      = "gvfsd-user"
         $path_3      = ".kw_"
-        $masquerade  = "kworker/u:8:0"
+        $masquerade_1 = "kworker/u:8:0"
+
+        // fc-cache / chronyd build C2/paths
+        $c2_7        = "ntp.timesync.to"
+        $c2_8        = "ntp.synctime.to"
+        $c2_9        = "ntp.syncstime.to"
+        $path_4      = "fontconfig/fc-cache"
+        $path_5      = ".fc_"
+        $path_6      = ".chrony-"
+        $masquerade_2 = "chronyd"
 
     condition:
         // Rust ELF profile: stripped, statically linked, ~1.9MB, x86-64 or arm64
         uint32(0) == 0x464c457f and
         filesize < 4MB and
-        2 of ($c2_*, $path_*, $masquerade)
+        2 of ($c2_*, $path_*, $masquerade_*)
 }
 
 rule StyleSmuggler_Poisoned_Log_Marker

@@ -1,24 +1,49 @@
 # StyleSmuggler — filesystem, process, and cron indicators
-# Sources: Sansec advisory + community IR on 2 confirmed live infections, 2026-09-05.
+# Sources: Sansec advisory (updated through 2026-09-07) + community IR on confirmed live
+# infections. See docs/VULNERABILITY.md for the full build-by-build comparison.
 
-## Implant binary and lock files (under the SITE USER's home directory, not root's,
-## and not the webroot — check every account on shared hosting)
+## Implant binary and lock files — THREE known builds so far, all believed to be the
+## same Rust codebase. Check every account's home directory on shared hosting, not just
+## root's or the webroot.
+
+# gvfsd-user build (first seen 2026-09-04, process [kworker/u:8:0])
 ~/.local/share/.gvfsd/gvfsd-user
 ~/.local/share/.gvfsd/.gvfsd_<8hex>.lock
 /tmp/.gvfsd_<8hex>.lock          # second lock location, outside the home dir
 /tmp/.kw_<random><random>
 
+# fc-cache build (first seen 2026-09-06, process fc-cache — arm64 and x86-64 builds)
+~/.cache/fontconfig/fc-cache
+/tmp/.fc_<8hex>.lock             # <8hex> is the first half of the implant's agent ID
+
+# chronyd build (first seen 2026-09-07, process chronyd — observed re-dropped on a host
+# already running the fc-cache build, with the SAME agent ID: same operator, new disguise)
+/tmp/.chrony-<8hex>/chronyd
+
 ## Cron persistence — written DIRECTLY to the spool file, not via `crontab`, so it does
 ## not generate the REPLACE line syslog normally logs on a crontab change.
 ## File: /var/spool/cron/crontabs/<user>
-*/5 * * * * exec <home>/.local/share/.gvfsd/gvfsd-user
-*/5 * * * * exec /tmp/.kw_                              # variant seen pointing at /tmp directly
+*/5 * * * * exec <home>/.local/share/.gvfsd/gvfsd-user   # gvfsd-user build: every 5 min
+*/5 * * * * exec /tmp/.kw_                                # variant seen pointing at /tmp directly
+13,43 * * * * exec <home>/.cache/fontconfig/fc-cache      # fc-cache build: twice/hour — easy to miss
 # Observed duplicated up to 1728 times in one crontab; self-restores within ~1 second of
 # manual removal if the process/binary itself hasn't been cleaned first. Clean order:
 # persistence -> process -> binary -> re-check persistence after a full cron cycle.
 
-## Process masquerade
-[kworker/u:8:0]     # owned by a NON-ROOT uid — this is the tell, the name alone is a legitimate kernel thread name
+## Process masquerade — three known disguises, all legitimate-sounding system process
+## names. Check OWNERSHIP (non-root uid) and, where possible, compare against the real
+## system binary at the equivalent path — the name alone proves nothing.
+[kworker/u:8:0]     # gvfsd-user build — real name of a Linux kernel worker thread
+fc-cache             # fc-cache build — real name of the fontconfig cache utility
+chronyd              # chronyd build — real name of the NTP daemon on most distros
+
+## Second, independent delivery vector (confirmed 2026-09-05/06): a file uploaded
+## through Magento's CUSTOMER CUSTOM OPTIONS feature, used as the write primitive
+## instead of the log-poisoning path below. Confirmed to succeed even when session
+## storage has been moved off Redis — that mitigation alone does not close this path.
+## No specific upload path has been publicly confirmed as of this writing; treat any
+## unexpected file appearing in customer-custom-options-related storage as suspect and
+## watch for Sansec/community updates on the exact location.
 
 ## Poisoned files (check BOTH — community responders' two confirmed infections both came
 ## through system.log, which the original advisory's own quick-check command does not cover)
@@ -50,4 +75,13 @@ python-requests/2.32.4      # second wave
 ## Network behavior anomaly (not file/process, but worth flagging alongside these)
 # One confirmed infection made a local Redis connection burst instead of any outbound
 # traffic: ~28 simultaneous connections to 127.0.0.1:6379, reading Magento session data
-# directly out of the store's own Redis instance.
+# directly out of the store's own Redis instance. The fc-cache/chronyd build instead
+# beacons over UDP/123, disguised as NTP traffic — see domains.txt.
+
+## Secondary / post-exploitation indicators (not the implant itself, but reported
+## alongside it — check these before declaring a store clean)
+app/etc/env.php                      # attacker-readable: DB creds, crypt/key, integration credentials
+pub/media/                           # reported location for dropped PHP webshells
+pub/static/                          # reported location for dropped PHP webshells
+<theme_dir>/                         # reported location for dropped PHP webshells
+admin_user (database table)          # check for an unexpected/rogue admin account

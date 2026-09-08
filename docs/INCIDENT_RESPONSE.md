@@ -23,7 +23,8 @@ if you find any of the indicators in [`../iocs/`](../iocs/) by hand.
 
 ## Step 2 — capture evidence
 
-For each suspicious `[kworker/...]`-style process not owned by root:
+For each suspicious `[kworker/...]`, `fc-cache`, or `chronyd`-named process not owned by
+root (or that doesn't match the real system binary at the equivalent path):
 
 ```bash
 # Preserve the in-memory binary — it may differ from the on-disk file
@@ -42,10 +43,16 @@ ss -tnp 2>/dev/null | grep "pid=$PID" > /root/evidence/proc_${PID}_sockets.txt
 
 Also preserve:
 
-- The on-disk implant, if present: `~/.local/share/.gvfsd/gvfsd-user` and its `.lock`
-  files, and anything under `/tmp/.kw_*` / `/tmp/.gvfsd_*`.
+- The on-disk implant, if present, across **any** of the three known builds:
+  `~/.local/share/.gvfsd/gvfsd-user` and its `.lock` files, `/tmp/.kw_*`, `/tmp/.gvfsd_*`;
+  `~/.cache/fontconfig/fc-cache` and `/tmp/.fc_*.lock`; `/tmp/.chrony-*/chronyd`.
 - The full crontab / cron spool for the affected user:
-  `cat /var/spool/cron/crontabs/<user>`.
+  `cat /var/spool/cron/crontabs/<user>`. Check for both the every-5-minute pattern and
+  the `fc-cache` build's twice-hourly `13,43 * * * *` pattern.
+- Any dropped PHP webshells under `pub/media/`, `pub/static/`, or theme directories —
+  multiple incident write-ups report these as a secondary persistence mechanism
+  alongside the named implant.
+- The `admin_user` database table, for an unexpected/rogue admin account.
 - The poisoned log/report files: `var/log/system.log` and any hit under `var/report/`.
 - Web server access logs covering the suspected compromise window, ideally including
   the raw `X-TRACE-*` / `X-*` trigger header and `User-Agent` values.
@@ -61,19 +68,19 @@ Order matters. Persistence re-adds itself if you kill the process first.
 
 1. **Remove persistence first:**
    ```bash
-   crontab -l -u <user> | grep -v -E 'gvfsd|\.kw_' | crontab -u <user> -
+   crontab -l -u <user> | grep -v -E 'gvfsd|\.kw_|fc-cache|\.fc_|chronyd|\.chrony-' | crontab -u <user> -
    # Also check the spool file directly — some variants bypass `crontab` entirely
-   sudo sed -i '/gvfsd/d;/\.kw_/d' /var/spool/cron/crontabs/<user>
+   sudo sed -i '/gvfsd/d;/\.kw_/d;/fc-cache/d;/\.fc_/d;/chronyd/d;/\.chrony-/d' /var/spool/cron/crontabs/<user>
    ```
-2. **Then kill the process:**
+2. **Then kill the process(es):**
    ```bash
    sudo kill -9 <pid>
-   watch -n 0.5 'ps auxf | grep -i kworker'   # confirm it does not respawn, ~60s
+   watch -n 0.5 'ps auxf | grep -iE "kworker|fc-cache|chronyd"'   # confirm it does not respawn, ~60s
    ```
-3. **Remove the on-disk binary and locks:**
+3. **Remove the on-disk binary and locks (check all three known builds):**
    ```bash
-   rm -rf ~/.local/share/.gvfsd/
-   rm -f /tmp/.kw_* /tmp/.gvfsd_*
+   rm -rf ~/.local/share/.gvfsd/ ~/.cache/fontconfig/fc-cache
+   rm -rf /tmp/.kw_* /tmp/.gvfsd_* /tmp/.fc_*.lock /tmp/.chrony-*
    ```
 4. **Check the crontab again** after a full cron cycle (at least 5–10 minutes, ideally
    longer) — confirmed re-appended entries have been observed even after apparent
@@ -83,16 +90,43 @@ Order matters. Persistence re-adds itself if you kill the process first.
 
 ## Step 4 — recover trust
 
-- **Rotate every Magento admin and API credential**, even if you see no direct evidence
-  the backdoor was used for anything beyond sitting there. The advisory's own guidance is
-  to rotate regardless.
-- If Redis was reachable from the implant, **rotate active customer sessions** and treat
-  session data as exposed; consider forcing re-authentication.
-- Prefer **rebuilding the node from a known-good image / clean deploy** over trying to
-  hand-clean a box that's had unauthenticated RCE, especially if you found the
-  in-memory-vs-on-disk hash mismatch (evidence the operator can update the implant).
+Code execution as the site user means **every secret that user could read is exposed —
+not "might be," is.** Treat the whole server as compromised, not just the process you
+found. Do this only *after* containment (Step 3) — rotating credentials while the
+attacker still has active execution just hands them the new ones too.
+
+- **Flush session storage** entirely, whichever backend you use — this logs out every
+  customer and admin, which is the point, since the implant has been observed reading
+  session data directly:
+  ```bash
+  redis-cli flushall                         # Redis-backed sessions
+  rm -f "$MAGENTO_ROOT"/var/session/sess_*   # file-backed sessions
+  # DELETE FROM session;                     # DB-backed sessions
+  ```
+- **Rotate the Magento `crypt/key`** in `app/etc/env.php`. This re-encrypts stored
+  secrets (including saved payment tokens), so plan the rotation carefully — don't just
+  hand-edit the value on a production store; use Magento's key-rotation tooling or a
+  tested community tool, and don't remove the old key outright (Magento needs it during
+  re-encryption).
+- **Rotate every other credential the site user could read**, at minimum: database
+  password, every admin account password (and invalidate existing admin sessions),
+  payment-provider API keys, other integration credentials in `env.php`, API/OAuth
+  tokens, and any SSH or deploy keys reachable by that user.
+- **Check the `admin_user` table for a rogue account** and remove it; check for dropped
+  PHP webshells under `pub/media/`, `pub/static/`, and theme directories, not just the
+  named backdoor process — stores have been re-compromised after cleanup addressed only
+  the files and not a leftover rogue admin account or database trigger.
+- Prefer **rebuilding the node from a known-good image / clean deploy** and **restoring
+  the database from a point you trust** over hand-cleaning a box that's had
+  unauthenticated RCE — especially if you found the in-memory-vs-on-disk hash mismatch
+  (evidence the operator can update the implant), or any of the secondary persistence
+  above.
 - Apply the mitigations in [`../mitigations/`](../mitigations/) (or a commercial WAF)
-  *before* bringing the node back into service, since there is still no official patch.
+  *before* bringing the node back into service, since there is still no official patch —
+  and remember GraphQL-blocking alone does not close the confirmed second delivery
+  vector via Magento's customer custom options upload.
+- If cardholder data may have been accessible, assess PCI-DSS breach notification
+  obligations as part of this step, not as an afterthought.
 
 ## Step 5 — harden against recurrence
 

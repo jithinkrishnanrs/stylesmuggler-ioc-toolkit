@@ -61,8 +61,8 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 log "\e[1mStyleSmuggler compromise scanner\e[0m"
-log "Built from: Sansec advisory 2026-09-05 + community incident response, same date."
-log "Reference:  https://sansec.io/research/stylesmuggler"
+log "Built from: Sansec advisory 2026-09-05, updated through 2026-09-07 + community IR."
+log "Reference:  https://sansec.io/research/stylesmuggler-0day"
 log "This is DETECTION ONLY unless --remediate is passed. See docs/INCIDENT_RESPONSE.md.\n"
 
 # ---------------------------------------------------------------------------
@@ -75,23 +75,35 @@ CANDIDATE_HOMES=($HOME_GLOB /root)
 for h in "${CANDIDATE_HOMES[@]}"; do
   [[ -d "$h" ]] || continue
 
+  # gvfsd-user build (first seen 2026-09-04)
   if [[ -e "$h/.local/share/.gvfsd/gvfsd-user" ]]; then
-    hit "Implant binary present: $h/.local/share/.gvfsd/gvfsd-user"
+    hit "Implant binary present (gvfsd-user build): $h/.local/share/.gvfsd/gvfsd-user"
   fi
   for lock in "$h"/.local/share/.gvfsd/.gvfsd_*.lock; do
-    [[ -e "$lock" ]] && hit "Implant lock file: $lock"
+    [[ -e "$lock" ]] && hit "Implant lock file (gvfsd-user build): $lock"
   done
+
+  # fc-cache build (first seen 2026-09-06)
+  if [[ -e "$h/.cache/fontconfig/fc-cache" ]]; then
+    hit "Implant binary present (fc-cache build): $h/.cache/fontconfig/fc-cache — verify against your distro's real fc-cache path/hash before assuming compromise"
+  fi
 done
 
 for lock in /tmp/.gvfsd_*.lock; do
-  [[ -e "$lock" ]] && hit "Implant lock file (second location): $lock"
+  [[ -e "$lock" ]] && hit "Implant lock file (second location, gvfsd-user build): $lock"
 done
 for kw in /tmp/.kw_*; do
-  [[ -e "$kw" ]] && hit "Implant artefact: $kw"
+  [[ -e "$kw" ]] && hit "Implant artefact (gvfsd-user build): $kw"
+done
+for lock in /tmp/.fc_*.lock; do
+  [[ -e "$lock" ]] && hit "Implant lock file (fc-cache build): $lock"
+done
+for chrony in /tmp/.chrony-*; do
+  [[ -e "$chrony/chronyd" ]] && hit "Implant binary present (chronyd build): $chrony/chronyd"
 done
 
 if [[ $FINDINGS -eq 0 ]]; then
-  ok "No known persistence file paths found under checked home directories or /tmp."
+  ok "No known persistence file paths found under checked home directories or /tmp (checked gvfsd-user, fc-cache, and chronyd build locations)."
 fi
 
 # ---------------------------------------------------------------------------
@@ -101,7 +113,7 @@ fi
 # ---------------------------------------------------------------------------
 section "Cron persistence"
 
-CRON_PATTERN='gvfsd|\.kw_'
+CRON_PATTERN='gvfsd|\.kw_|fc-cache|\.fc_|chronyd|\.chrony-'
 
 check_crontab_output() {
   local label="$1" content="$2"
@@ -131,12 +143,15 @@ if [[ $FINDINGS -eq 0 ]] || ! printf '%s\n' "${REPORT_LINES[@]}" | grep -q "cron
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Masquerading process — [kworker/u:8:0] NOT owned by root
-#    (the name alone is a legitimate kernel thread name; ownership is the tell)
+# 3. Masquerading process — [kworker/u:8:0], fc-cache, or chronyd that looks wrong
+#    (the names alone are legitimate system process/utility names; ownership and/or
+#    the real executable path is the tell)
 # ---------------------------------------------------------------------------
-section "Process masquerade ([kworker/u:8:0] owned by non-root)"
+section "Process masquerade ([kworker/u:8:0], fc-cache, or chronyd)"
 
 SUSPECT_PIDS=()
+
+# --- [kworker/u:8:0]: flag if owned by non-root ---
 while IFS= read -r line; do
   [[ -z "$line" ]] && continue
   puser=$(awk '{print $1}' <<<"$line")
@@ -150,8 +165,32 @@ while IFS= read -r line; do
   fi
 done < <(ps -eo user:32,pid,comm,args 2>/dev/null | awk '$0 ~ /kworker\/u:8:0/ {print $1, $2, $3, $0}' | awk '{ $1=$1; print $1" "$2" "substr($0, index($0,$4)) }')
 
+# --- fc-cache / chronyd: these are NOT normally long-running daemons owned by a web
+# site user. Flag any persistent process by these names whose /proc/<pid>/exe does not
+# resolve under a standard system binary directory (/usr, /sbin, /bin, /lib), or that
+# is owned by a typical web/app user rather than root/a dedicated system account.
+for pname in fc-cache chronyd; do
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    puser=$(awk '{print $1}' <<<"$line")
+    ppid=$(awk '{print $2}' <<<"$line")
+    pcmd=$(cut -d' ' -f3- <<<"$line")
+    real_exe=""
+    [[ -r "/proc/$ppid/exe" ]] && real_exe=$(readlink -f "/proc/$ppid/exe" 2>/dev/null)
+    if [[ -n "$real_exe" && ! "$real_exe" =~ ^/(usr|sbin|bin|lib) ]]; then
+      hit "Process '$pcmd' (PID $ppid, user '$puser') named '$pname' but running from non-system path: $real_exe — matches fc-cache/chronyd build masquerade"
+      SUSPECT_PIDS+=("$ppid")
+    elif [[ "$puser" != "root" && "$puser" != "chrony" && "$puser" != "_chrony" && "$puser" != "systemd-timesync" ]]; then
+      hit "Process '$pcmd' (PID $ppid) named '$pname' owned by unexpected user '$puser' (not root or a standard time-sync/fontconfig account)"
+      SUSPECT_PIDS+=("$ppid")
+    else
+      info "Found $pcmd (PID $ppid) owned by '$puser', exe resolves under a system path — likely genuine, not flagged"
+    fi
+  done < <(ps -eo user:32,pid,comm,args 2>/dev/null | awk -v p="$pname" '$3 == p {print $1, $2, $3, $0}' | awk '{ $1=$1; print $1" "$2" "substr($0, index($0,$4)) }')
+done
+
 if [[ ${#SUSPECT_PIDS[@]} -eq 0 ]]; then
-  ok "No non-root [kworker/u:8:0]-named processes found."
+  ok "No suspicious [kworker/u:8:0], fc-cache, or chronyd processes found."
 fi
 
 # ---------------------------------------------------------------------------
@@ -237,19 +276,37 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 6. Network anomalies — published C2, AND local Redis connection burst (at least one
-#    confirmed infection made ZERO outbound connections and instead harvested sessions
-#    over 127.0.0.1:6379 — absence of C2 traffic is not evidence of a clean host)
+# 6. Network anomalies — published C2 (TCP), NTP-shaped C2 (UDP/123, fc-cache/chronyd
+#    build), AND local Redis connection burst (at least one confirmed infection made
+#    ZERO outbound connections and instead harvested sessions over 127.0.0.1:6379 —
+#    absence of C2 traffic is not evidence of a clean host)
 # ---------------------------------------------------------------------------
 section "Network"
 
 if command -v ss >/dev/null 2>&1; then
-  C2_IPS=("99.84.67.186")
+  C2_IPS=("99.84.67.186" "209.141.43.95")
   for ip in "${C2_IPS[@]}"; do
     if ss -tn 2>/dev/null | grep -q "$ip"; then
-      hit "Active connection to known C2 address $ip"
+      hit "Active connection to known C2/download address $ip"
     fi
   done
+
+  # fc-cache/chronyd build beacons over UDP/123 disguised as NTP — check for resolved
+  # connections to the known C2 domains if getent/dig is available, since ss won't show
+  # a domain name directly.
+  NTP_C2_DOMAINS=("ntp.timesync.to" "ntp.synctime.to" "ntp.syncstime.to")
+  if command -v getent >/dev/null 2>&1; then
+    for d in "${NTP_C2_DOMAINS[@]}"; do
+      resolved=$(getent hosts "$d" 2>/dev/null | awk '{print $1}')
+      if [[ -n "$resolved" ]] && ss -un 2>/dev/null | grep -q "$resolved"; then
+        hit "Active UDP connection to resolved IP of known NTP-shaped C2 domain $d ($resolved)"
+      fi
+    done
+  fi
+  udp123_count=$(ss -un 2>/dev/null | grep -c ':123 ')
+  if [[ "$udp123_count" -gt 0 ]]; then
+    info "Found $udp123_count active UDP/123 (NTP) socket(s) — verify these point at your real NTP servers, not the C2 domains in iocs/domains.txt. The fc-cache/chronyd build's beacon looks like NTP traffic to casual inspection."
+  fi
 
   REDIS_CONNS=$(ss -tn 2>/dev/null | grep -c '127\.0\.0\.1:6379')
   if [[ "$REDIS_CONNS" -gt 10 ]]; then
@@ -261,7 +318,7 @@ else
   info "'ss' not found — skipping live network check. Consider checking your firewall/proxy logs against iocs/ips.txt and iocs/domains.txt instead."
 fi
 
-log "\n\e[33mReminder:\e[0m at least one confirmed infection made no outbound network traffic at all. A clean network check alone does NOT mean the host is clean — trust the filesystem/process/cron/hash checks above at least as much."
+log "\n\e[33mReminder:\e[0m at least one confirmed infection made no outbound network traffic at all, and a newer build's beaconing is deliberately shaped to look like ordinary NTP traffic on UDP/123. A clean network check alone does NOT mean the host is clean — trust the filesystem/process/cron/hash checks above at least as much."
 
 # ---------------------------------------------------------------------------
 # Summary

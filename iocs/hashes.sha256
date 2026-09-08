@@ -1,14 +1,29 @@
 # StyleSmuggler implant — SHA-256 hashes
 #
 # Format: <sha256>  <label>
-# Source: Sansec advisory (sample hash) + community IR on two independently confirmed
-# live infections, 2026-09-05. See docs/VULNERABILITY.md for why there are three hashes,
-# not two: on one host, the binary running in memory differed from the binary on disk.
-# ALWAYS also hash the running /proc/<pid>/exe, not only files at rest — see
-# scripts/stylesmuggler_scan.sh.
+# Source: Sansec advisory (sample hashes, updated through 2026-09-07) + community IR on
+# two independently confirmed live infections. See docs/VULNERABILITY.md for why there
+# are multiple hashes per build: on one host, the binary running in memory differed from
+# the binary on disk, and the implant has iterated through three named disguises within
+# 72 hours of disclosure. ALWAYS also hash the running /proc/<pid>/exe, not only files
+# at rest — see scripts/stylesmuggler_scan.sh.
 #
 # Binary profile: ~1.9 MB, stripped, statically linked Rust, built for x86-64 and arm64.
+# Because the binary is new and hashes vary build-to-build (and disk-vs-memory), do NOT
+# rely on hash matching alone — pair this list with the behavioral checks in
+# scripts/stylesmuggler_scan.sh (process ownership, cron pattern, network shape).
 
+## gvfsd-user build (first seen 2026-09-04, process name [kworker/u:8:0])
 e315687a1dfe61ef4a5a5642214db6d3b2b05d81391285eebc2af664641a26a7  gvfsd-user (Sansec published sample)
 8334b434fa3fe9f59cebe9609b11e0b1fd19d10212c45c705adec1902a1d06ef  gvfsd-user (on-disk, both community-confirmed infections)
 251fabd50d7b18a8b5e1b3ef5d64e7198c17244778f6461fb1ab07f6169bf220  gvfsd-user (in-memory /proc/<pid>/exe variant, differs from on-disk sample above)
+
+## fc-cache / chronyd build (first seen 2026-09-06 as fc-cache; same agent ID redeployed
+## as chronyd on 2026-09-07 — treat as the same operator/codebase, new disguise)
+b79dfdc1eed860e0b76c629d6adfce251db379b0b45a6d728d4ef483f7551420  fc-cache / chronyd build, sample 1
+4352cabaa451e5a894535fbcc4d46628701303322a13745cb5479d7d0534ae8e  fc-cache / chronyd build, sample 2
+d2fbf9eb75c495bfea48790d3b228fab0c15a282419c3d3f5e49294c4e1a3e82  fc-cache / chronyd build, sample 3
+
+# NOTE: hash lists like this one lag the attacker by definition. At disclosure time, no
+# security vendor besides Sansec recognized any sample on VirusTotal. Treat every hash
+# above as a snapshot of specific observed builds, not an exhaustive detection method.
