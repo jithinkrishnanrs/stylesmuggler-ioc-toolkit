@@ -1,14 +1,67 @@
 # Changelog
 
-All notable changes to this toolkit are recorded here. This is an active-incident repo
-for a vulnerability with no CVE and no vendor patch yet — expect frequent updates.
+All notable changes to this toolkit are recorded here. This started as an active,
+unpatched 0-day incident repo; Adobe has since shipped an official fix (see below), but
+expect continued updates as compromise cleanup, secondary-attacker activity, and patch
+adoption play out.
 
 ## [Unreleased]
-- Watching for: CVE assignment, official Adobe patch, and any further trigger-header /
-  UA / hash / process-masquerade variants beyond the three implant disguises observed
-  so far (`gvfsd-user` → `fc-cache` → `chronyd`).
+- Watching for: further variants of the second, unrelated web-shell attacker; any
+  additional implant version bumps beyond `fc-cache` 2.1.4 / `chronyd` 2.1.5; official
+  Adobe patch coverage for versions below the currently supported floor.
 
-## 2026-09-07 — second exploitation vector, two new backdoor variants
+## 2026-09-07 (evening) — Adobe ships CVE-2026-75650 / APSB26-146, second attacker found
+This is the big one: Adobe assigned a CVE, published a Priority 1 bulletin, and shipped
+an official hotfix — and Sansec separately identified a **second, unrelated attacker**
+also exploiting StyleSmuggler.
+
+- **CVE-2026-75650 assigned. Adobe Security Bulletin APSB26-146 published 2026-09-07 at
+  20:20 UTC**, Priority 1 (Adobe's highest), CVSS 3.1/4.0 **10.0**, CWE-1336 (Improper
+  Neutralization of Special Elements Used in a Template Engine). Official hotfix
+  **VULN-39341** now available from Adobe. See new `docs/PATCHING.md`.
+- Coverage is not universal: Adobe Commerce 2.4.4–2.4.9 and B2B 1.3.3–1.5.3 are covered;
+  **Magento Open Source below 2.4.6 gets no official fix.** Reflected in the README
+  status table and `docs/PATCHING.md`.
+- **A second, unrelated attacker** was found exploiting the same StyleSmuggler entry
+  point to drop a PHP web shell at
+  `pub/media/catalog/product/cache/ss_<10hex>/sync_<10hex>.php` — independent of the
+  Rust implant operator, "off-the-shelf tooling" per Sansec, not a fleet operation. This
+  actor sends a **reconnaissance probe first**: a cover GraphQL query with the actual
+  payload smuggled in the `Store:` request header, exfiltrating recon data (OS/kernel
+  string, PHP user, cwd, `pub/media` writability) via chunked DNS labels to an
+  out-of-band canary domain rather than reading an HTTP response. Full technical
+  breakdown in `docs/VULNERABILITY.md`; detection added to `iocs/`, both scanners, and a
+  new pair of PHP-execution-blocking mitigation configs.
+- New **early-warning indicator**: a garbled "Payment Transaction Failed Reminder"
+  email containing raw `{{var ...}}` template tags and a customer address ending in
+  `.invalid` is often the first visible sign of exploitation, before any log-based
+  indicator — added to the README and `iocs/`.
+- Identified the specific vulnerable sink file, `setup/src/Magento/Setup/Module/Di/Code/Scanner/ArrayScanner.php`,
+  and the rendering entry point, `getProcessedTemplate` — useful for confirming whether
+  the official patch has actually been applied to a given install.
+- Implant version numbers confirmed: `fc-cache` build is v2.1.4, `chronyd` build is
+  v2.1.5 (same agent ID, incremented version — same operator).
+- New fc-cache/chronyd network indicator: outbound plain-HTTP calls to public
+  IP-lookup services (`api4.ipify.org`, `ipv4.icanhazip.com`, `ipv4.ident.me`,
+  `ipinfo.io`) with a truncated User-Agent — added as an informational check, since
+  these services are legitimate but a Magento backend calling them is not normal.
+- Expanded access-log detection keywords beyond `styles[`: `generatorClass`,
+  `with_resolved`, and the malware-download domain fragment `cdnflare` all appear in
+  corroborating community grep patterns — added to `iocs/file_paths.txt` and both
+  scanners.
+- `docs/INCIDENT_RESPONSE.md`: added specific `app/etc/env.php` Redis-configuration
+  inspection commands (cache DB, page-cache DB, session DB) and the `pub/media` PHP
+  sweep as explicit steps.
+- New `docs/PATCHING.md`: official hotfix identifiers, where to get it, affected-version
+  coverage table, and pointers to community delivery tooling for applying it.
+- New mitigation files blocking PHP execution under `pub/media`/`pub/static` (nginx +
+  Apache) — targeted defense against the second attacker's web-shell technique,
+  independent of the GraphQL-blocking rules.
+- Sansec states it has not yet seen evidence the Rust implant itself was weaponized
+  beyond persistence/reconnaissance — noted in `docs/VULNERABILITY.md` as a nuance, not
+  reassurance: a web shell was found on the same access path from an unrelated actor.
+
+## 2026-09-06/07 — second exploitation vector, two new backdoor variants
 - Sansec's advisory updated to confirm a **second, independent delivery vector**: a file
   uploaded via Magento's customer custom options feature, confirmed to succeed even when
   session storage is moved off Redis. GraphQL-blocking mitigations alone do not close
@@ -27,17 +80,11 @@ for a vulnerability with no CVE and no vendor patch yet — expect frequent upda
 - `iocs/yara/stylesmuggler.yar`, `iocs/suricata/stylesmuggler.rules`: updated with new
   hashes, strings, and network rules for the newer build; fixed advisory reference URL
   to the canonical `sansec.io/research/stylesmuggler-0day`.
-- New `docs/FAQ.md` — quick, sourced answers for common questions (CVE status, patch
-  status, "am I safe if patched", the Redis-migration-doesn't-help finding, etc.).
+- New `docs/FAQ.md` — quick, sourced answers for common questions.
 - `docs/INCIDENT_RESPONSE.md`: expanded credential-rotation guidance (flush sessions,
   rotate `app/etc/env.php` crypt/key and all credentials, check for rogue `admin_user`
   entries and dropped webshells under `pub/media/`/`pub/static/`/theme directories)
   sourced from community cleanup guides, not just the original advisory.
-- Removed `docs/PUBLISHING.md` (repo-specific publishing instructions, no longer needed
-  now that the repo is live at
-  [github.com/jithinkrishnanrs/stylesmuggler-ioc-toolkit](https://github.com/jithinkrishnanrs/stylesmuggler-ioc-toolkit)).
-- Adobe Enterprise Support confirmed Sept 7 that a fix is in progress (no date, no CVE
-  yet) — reflected in the status table.
 
 ## 2026-09-06 — initial release
 - Initial toolkit built from the Sansec advisory (published 2026-09-05) and community
@@ -50,13 +97,12 @@ for a vulnerability with no CVE and no vendor patch yet — expect frequent upda
   IPs (with source-address classification — bulk/infra vs. residential proxy pool),
   file paths, YARA rule, Suricata/IDS rules.
 - `mitigations/`: nginx, Apache, ModSecurity, and fail2ban interim rules for blocking
-  or rate-limiting the GraphQL `styles[]` delivery vector while there is no patch.
+  or rate-limiting the GraphQL `styles[]` delivery vector while there was no patch.
 - `docs/`: vulnerability technical summary, timeline, incident-response playbook.
 
-### Known limitations at this release
-- No CVE exists yet; all version/impact claims trace to Sansec's advisory and named
-  community responders, not to an authoritative vendor bulletin.
-- The trigger-header format has already changed once within 24 hours of disclosure
+### Known limitations at this release (superseded — see 2026-09-07 entry above)
+- No CVE existed yet at this point; that changed with APSB26-146/CVE-2026-75650.
+- The trigger-header format changed once within 24 hours of disclosure
   (`X-TRACE-<10hex>` → `X-<12hex>`); treat all literal-string signatures in this repo as
   likely to need updating again, and prefer the shape-based / behavioral checks over
   any single string match.

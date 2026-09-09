@@ -1,10 +1,12 @@
-# StyleSmuggler — filesystem, process, and cron indicators
-# Sources: Sansec advisory (updated through 2026-09-07) + community IR on confirmed live
-# infections. See docs/VULNERABILITY.md for the full build-by-build comparison.
+# StyleSmuggler / CVE-2026-75650 — filesystem, process, and cron indicators
+# Sources: Sansec advisory (updated through 2026-09-07 20:50 UTC) + Adobe APSB26-146 +
+# community IR on confirmed live infections. See docs/VULNERABILITY.md for the full
+# build-by-build comparison and the second, unrelated attacker's technique.
 
 ## Implant binary and lock files — THREE known builds so far, all believed to be the
-## same Rust codebase. Check every account's home directory on shared hosting, not just
-## root's or the webroot.
+## same Rust codebase (the Rust implant campaign; a SEPARATE, unrelated PHP web-shell
+## attacker is covered further down). Check every account's home directory on shared
+## hosting, not just root's or the webroot.
 
 # gvfsd-user build (first seen 2026-09-04, process [kworker/u:8:0])
 ~/.local/share/.gvfsd/gvfsd-user
@@ -12,12 +14,13 @@
 /tmp/.gvfsd_<8hex>.lock          # second lock location, outside the home dir
 /tmp/.kw_<random><random>
 
-# fc-cache build (first seen 2026-09-06, process fc-cache — arm64 and x86-64 builds)
+# fc-cache build (first seen 2026-09-06, version 2.1.4, process fc-cache — arm64 and x86-64 builds)
 ~/.cache/fontconfig/fc-cache
 /tmp/.fc_<8hex>.lock             # <8hex> is the first half of the implant's agent ID
 
-# chronyd build (first seen 2026-09-07, process chronyd — observed re-dropped on a host
-# already running the fc-cache build, with the SAME agent ID: same operator, new disguise)
+# chronyd build (first seen 2026-09-07, version 2.1.5, process chronyd — observed
+# re-dropped on a host already running the fc-cache build, with the SAME agent ID and
+# incremented version: same operator, new disguise)
 /tmp/.chrony-<8hex>/chronyd
 
 ## Cron persistence — written DIRECTLY to the spool file, not via `crontab`, so it does
@@ -37,15 +40,21 @@
 fc-cache             # fc-cache build — real name of the fontconfig cache utility
 chronyd              # chronyd build — real name of the NTP daemon on most distros
 
-## Second, independent delivery vector (confirmed 2026-09-05/06): a file uploaded
-## through Magento's CUSTOMER CUSTOM OPTIONS feature, used as the write primitive
-## instead of the log-poisoning path below. Confirmed to succeed even when session
-## storage has been moved off Redis — that mitigation alone does not close this path.
-## No specific upload path has been publicly confirmed as of this writing; treat any
-## unexpected file appearing in customer-custom-options-related storage as suspect and
-## watch for Sansec/community updates on the exact location.
+## Vulnerable sink (for confirming whether the official patch is applied — see
+## docs/PATCHING.md). The DI code-scanner sink Magento's rendering path reaches:
+setup/src/Magento/Setup/Module/Di/Code/Scanner/ArrayScanner.php
+# Rendering entry point (Magento's own method name, useful when grepping stack traces
+# or debug logs during investigation): getProcessedTemplate
 
-## Poisoned files (check BOTH — community responders' two confirmed infections both came
+## Second, independent delivery vector for the SAME Rust-implant campaign (confirmed
+## 2026-09-05/06): a file uploaded through Magento's CUSTOMER CUSTOM OPTIONS feature,
+## used as the write primitive instead of the log-poisoning path below. Confirmed to
+## succeed even when session storage has been moved off Redis — that mitigation alone
+## does not close this path. No specific upload path has been publicly confirmed as of
+## this writing; treat any unexpected file appearing in customer-custom-options-related
+## storage as suspect and watch for Sansec/community updates on the exact location.
+
+## Poisoned files (check BOTH — community responders' confirmed infections came
 ## through system.log, which the original advisory's own quick-check command does not cover)
 var/log/system.log       # poisoned via an invalid store code, logged verbatim by Magento
 var/report/<hash>        # the location the original advisory's quick-check targets
@@ -55,6 +64,14 @@ POST /graphql?styles[...]=                                                  # pe
 POST /paypal/transparent/response/?<?=eval(base64_decode('...              # published by Sansec
 # Also observed riding in the User-Agent header rather than the URL on requests to:
 GET  /customer/section/load/?sections=customer&force_new_section_timestamp=true
+
+## Access-log grep keywords (broader than styles[] alone — from corroborating community
+## sources). Test on your own logs first: both patterns below can in principle match a
+## storefront search for that literal text, though this returns 0 hits on almost every
+## real store.
+grep -acE 'styles(\[|%5B)|generatorClass|with_resolved|cdnflare' access.log
+grep -acE 'styles(\[|%5B)|(\{\{|%7B%7B)(block|config|var)' access.log        # narrower variant
+grep -c '"POST /graphql'  access.log                                         # baseline: do you even use GraphQL?
 
 ## Trigger header (value is regenerated per request — match the SHAPE, not the literal value)
 X-TRACE-<10 hex>     # e.g. X-TRACE-1713CB9C2F   — observed morning of 2026-09-05
@@ -72,16 +89,63 @@ python-requests/2.32.4      # second wave
 # Version changed between waves. Treat "python-requests on POST /graphql with a styles[]
 # argument" as the signal, not any specific version string.
 
+## Early-warning indicator — no tooling required, check your inbox
+# A garbled "Payment Transaction Failed Reminder" email containing raw, unrendered
+# {{var ...}} template tags, sent to/from a customer address ending in ".invalid". This
+# is a side effect of the exploit's detonation stage and is often the FIRST visible
+# sign of exploitation, ahead of any log-based indicator. An unexpected burst of
+# failed-payment notification emails is also worth investigating, though legitimate
+# card declines cause these too.
+
 ## Network behavior anomaly (not file/process, but worth flagging alongside these)
 # One confirmed infection made a local Redis connection burst instead of any outbound
 # traffic: ~28 simultaneous connections to 127.0.0.1:6379, reading Magento session data
 # directly out of the store's own Redis instance. The fc-cache/chronyd build instead
-# beacons over UDP/123, disguised as NTP traffic — see domains.txt.
+# beacons over UDP/123, disguised as NTP traffic, and separately makes plain-HTTP calls
+# to public IP-lookup services with a truncated User-Agent — see domains.txt for both.
 
-## Secondary / post-exploitation indicators (not the implant itself, but reported
-## alongside it — check these before declaring a store clean)
+## ================================================================================
+## A SECOND, UNRELATED ATTACKER (confirmed 2026-09-07) — different operator, same
+## StyleSmuggler entry point, much simpler payload. See docs/VULNERABILITY.md for the
+## full technical breakdown. Do NOT assume cleaning the Rust implant above makes a
+## store clean — check for this independently.
+## ================================================================================
+
+## Web shell path (the dropper, ~485 bytes, PHP) — pub/media should NEVER contain
+## executable PHP on a correctly configured Magento store, so any hit here is significant
+pub/media/catalog/product/cache/ss_<10hex>/sync_<10hex>.php
+# Detection:
+find pub/media -name '*.php'
+
+## Recon probe (sent BEFORE the dropper, from the same operator) — a cover GraphQL
+## query with the real payload smuggled in the Store: request header instead of the
+## query body or URL:
+POST /graphql
+Body: {"query":"query { storeConfig { store_code } }"}
+Header: Store: <injected PHP payload>
+# Collects: kernel/OS string, PHP process user, cwd, and whether pub/media is writable
+# (tracked internally as a "w_pm" flag gating whether the web-shell drop is attempted).
+
+## Recon exfiltration — DNS-based, NOT visible in the HTTP response. Chunked (50 chars/
+## label) and sent as hostname labels with a sequence index against an out-of-band
+## canary domain under the oast.site collaborator service:
+<50-char-chunk>-<index>.<24-char-subdomain>.oast.site
+# If you have DNS query-log visibility, watch for queries to *.oast.site or similarly
+# structured OOB-canary domains originating from your Magento application host — a
+# backend server has no legitimate reason to be making these lookups.
+
+## Campaign markers — the recon probe and the dropper carry a matching campaign
+## identifier plus a short hex suffix, with the probe's marker sequence number one
+## higher than the dropper's:
+ss5_<hex>    # dropper marker
+ss6_<hex>    # recon probe marker (same hex suffix as the matching dropper)
+# Treat grep hits for "ss5_" / "ss6_" followed by 10 hex characters in logs or
+# recovered payloads as belonging to this second attacker's campaign.
+
+## Secondary / post-exploitation indicators (not either implant/web-shell itself, but
+## reported alongside them — check these before declaring a store clean)
 app/etc/env.php                      # attacker-readable: DB creds, crypt/key, integration credentials
-pub/media/                           # reported location for dropped PHP webshells
+pub/media/                           # reported location for dropped PHP webshells (both actors)
 pub/static/                          # reported location for dropped PHP webshells
 <theme_dir>/                         # reported location for dropped PHP webshells
 admin_user (database table)          # check for an unexpected/rogue admin account

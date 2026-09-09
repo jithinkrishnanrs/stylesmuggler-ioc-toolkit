@@ -3,13 +3,21 @@
 Use this if `scripts/stylesmuggler_scan.sh` (or the Python equivalent) reports a hit, or
 if you find any of the indicators in [`../iocs/`](../iocs/) by hand.
 
+**Note on patching:** Adobe's official hotfix (VULN-39341 / APSB26-146, CVE-2026-75650)
+now exists — see [`PATCHING.md`](PATCHING.md). Patching stops *new* exploitation; it
+does not undo an existing compromise. If you suspect you were already hit, work through
+this playbook's evidence-preservation steps before applying the hotfix on that specific
+host, so you don't destroy what you'd want to investigate. If you have no evidence of
+prior compromise, patch first, then still run the scanner to be sure.
+
 ## First: don't destroy evidence
 
 - **Do not reboot the host.** Some of what you need (the running process, its memory,
   its `/proc/<pid>/exe` link) doesn't survive a reboot.
 - **Do not run `composer install` or redeploy over the top before evidence capture.**
   Both can overwrite artifacts you'll want later, and composer reinstall has been
-  observed to destroy useful forensic state.
+  observed to destroy useful forensic state. This includes applying the official
+  hotfix — capture evidence first if you suspect prior compromise.
 - **Do not just `kill -9` the process first.** Confirmed persistence re-adds itself
   within a second on at least one host. If you kill it before removing persistence, it
   comes right back and you've lost your chance to observe it cleanly.
@@ -51,11 +59,34 @@ Also preserve:
   the `fc-cache` build's twice-hourly `13,43 * * * *` pattern.
 - Any dropped PHP webshells under `pub/media/`, `pub/static/`, or theme directories —
   multiple incident write-ups report these as a secondary persistence mechanism
-  alongside the named implant.
+  alongside the named implant. This specifically includes the **second, unrelated
+  attacker's** web shell pattern:
+  ```bash
+  find pub/media -name '*.php'
+  # The specific known path pattern from the second attacker:
+  find pub/media/catalog/product/cache -type d -name 'ss_*' 2>/dev/null
+  ```
+  `pub/media` should never contain executable PHP on a correctly configured Magento
+  store — any hit here is significant regardless of whether you've also found the Rust
+  implant.
 - The `admin_user` database table, for an unexpected/rogue admin account.
+- Your Redis configuration and connections, if you use Redis for cache/page-cache/
+  sessions:
+  ```bash
+  grep -nA40 "'cache'" app/etc/env.php
+  grep -nA30 "'session'" app/etc/env.php
+  # Note the host, port/socket, and database index for cache, page-cache, and session
+  # from the output above, then inspect actual connections:
+  ss -tpn | grep ':6379'
+  ```
 - The poisoned log/report files: `var/log/system.log` and any hit under `var/report/`.
 - Web server access logs covering the suspected compromise window, ideally including
-  the raw `X-TRACE-*` / `X-*` trigger header and `User-Agent` values.
+  the raw `X-TRACE-*` / `X-*` trigger header, the `Store:` header (the second
+  attacker's delivery mechanism), and `User-Agent` values. A broader sweep for the
+  delivery attempt itself:
+  ```bash
+  grep -acE 'styles(\[|%5B)|generatorClass|with_resolved|cdnflare' /path/to/access.log
+  ```
 - If your incident process supports it and the box is important enough: a full memory
   capture before you touch anything further.
 
@@ -85,7 +116,15 @@ Order matters. Persistence re-adds itself if you kill the process first.
 4. **Check the crontab again** after a full cron cycle (at least 5–10 minutes, ideally
    longer) — confirmed re-appended entries have been observed even after apparent
    removal.
-5. **Clean the poisoned log/report files** (`var/log/system.log`, `var/report/<hash>`)
+5. **Remove the second, unrelated attacker's web shell**, if present — this is
+   independent of the Rust implant and needs its own cleanup:
+   ```bash
+   find pub/media -name '*.php' -print
+   # Review each hit before deleting — capture a copy for evidence first (Step 2).
+   # The specific known pattern:
+   find pub/media/catalog/product/cache -path '*/ss_*/sync_*.php' -delete
+   ```
+6. **Clean the poisoned log/report files** (`var/log/system.log`, `var/report/<hash>`)
    only *after* you've captured the copies you want for evidence.
 
 ## Step 4 — recover trust
@@ -113,7 +152,9 @@ attacker still has active execution just hands them the new ones too.
   payment-provider API keys, other integration credentials in `env.php`, API/OAuth
   tokens, and any SSH or deploy keys reachable by that user.
 - **Check the `admin_user` table for a rogue account** and remove it; check for dropped
-  PHP webshells under `pub/media/`, `pub/static/`, and theme directories, not just the
+  PHP webshells under `pub/media/`, `pub/static/`, and theme directories — including the
+  second, unrelated attacker's specific pattern
+  (`pub/media/catalog/product/cache/ss_<10hex>/sync_<10hex>.php`) — not just the
   named backdoor process — stores have been re-compromised after cleanup addressed only
   the files and not a leftover rogue admin account or database trigger.
 - Prefer **rebuilding the node from a known-good image / clean deploy** and **restoring
@@ -121,10 +162,14 @@ attacker still has active execution just hands them the new ones too.
   unauthenticated RCE — especially if you found the in-memory-vs-on-disk hash mismatch
   (evidence the operator can update the implant), or any of the secondary persistence
   above.
-- Apply the mitigations in [`../mitigations/`](../mitigations/) (or a commercial WAF)
-  *before* bringing the node back into service, since there is still no official patch —
-  and remember GraphQL-blocking alone does not close the confirmed second delivery
-  vector via Magento's customer custom options upload.
+- **Apply Adobe's official hotfix (VULN-39341 / APSB26-146, CVE-2026-75650)** — see
+  [`PATCHING.md`](PATCHING.md) — *before* bringing the node back into service. If your
+  version isn't covered by Adobe's fix, apply the mitigations in
+  [`../mitigations/`](../mitigations/) (or a commercial WAF) as a stopgap instead, and
+  plan an upgrade. Either way, remember GraphQL-blocking alone does not close the
+  confirmed second delivery vector via Magento's customer custom options upload, nor
+  the unrelated second attacker's `Store:`-header-based delivery — the official patch
+  is the only thing that closes the underlying sink itself.
 - If cardholder data may have been accessible, assess PCI-DSS breach notification
   obligations as part of this step, not as an afterthought.
 

@@ -1,8 +1,11 @@
 /*
-    StyleSmuggler implant — YARA rules
-    Built from published/observed indicators only (strings, paths, C2 hosts).
-    Sources: Sansec advisory (2026-09-05) + community IR write-ups on two confirmed
-    live infections, same date. See ../../docs/VULNERABILITY.md.
+    StyleSmuggler / CVE-2026-75650 — YARA rules
+    Built from published/observed indicators only (strings, paths, C2 hosts, campaign
+    markers). Covers BOTH the Rust implant campaign (gvfsd-user/fc-cache/chronyd) AND
+    the second, unrelated PHP web-shell attacker confirmed 2026-09-07 — these are two
+    separate rule groups for two separate operators using the same entry point.
+    Sources: Sansec advisory (2026-09-05, updated through at least 2026-09-07) + Adobe
+    APSB26-146 + community IR write-ups. See ../../docs/VULNERABILITY.md.
 
     Usage:
         yara -r stylesmuggler.yar /                      # filesystem sweep
@@ -11,9 +14,10 @@
     NOTE: these rules key off strings and known hashes gathered from public reporting,
     not off a sample this repo ships or was built by disassembling. Expect false
     negatives against future variants — the attacker has already changed the trigger
-    header format once within 24 hours of disclosure. Pair this with the behavioral
-    checks in scripts/stylesmuggler_scan.sh, which do not depend on any of these
-    literal strings.
+    header format once within 24 hours of disclosure, and both implant version and
+    the second attacker's campaign markers change per-drop. Pair this with the
+    behavioral checks in scripts/stylesmuggler_scan.sh, which do not depend on any of
+    these literal strings.
 */
 
 import "hash"
@@ -86,4 +90,23 @@ rule StyleSmuggler_Poisoned_Log_Marker
 
     condition:
         $marker
+}
+
+rule StyleSmuggler_SecondAttacker_WebShell
+{
+    meta:
+        description = "Matches the second, unrelated attacker's PHP web shell/recon-probe artefacts (confirmed 2026-09-07) - filename pattern, campaign markers, and OOB exfil domain suffix. This is a SEPARATE campaign from the Rust implant rules above."
+        source = "Sansec advisory, updated 2026-09-07"
+        reference = "https://sansec.io/research/stylesmuggler-0day"
+        date = "2026-09-07"
+
+    strings:
+        $path        = "catalog/product/cache/ss_"
+        $marker_drop = /ss5_[0-9a-f]{10}/
+        $marker_recon = /ss6_[0-9a-f]{10}/
+        $exfil_tld   = ".oast.site"
+        $wpm_flag    = "w_pm"
+
+    condition:
+        any of them
 }

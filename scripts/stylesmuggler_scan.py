@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
 """
-stylesmuggler_scan.py — read-only compromise scanner for the StyleSmuggler
-Magento / Adobe Commerce 0-day (Sansec advisory, 2026-09-05).
+stylesmuggler_scan.py — read-only compromise scanner for StyleSmuggler / CVE-2026-75650,
+the Magento / Adobe Commerce RCE (Adobe bulletin APSB26-146, hotfix VULN-39341).
+
+IMPORTANT: applying Adobe's official patch (see docs/PATCHING.md) stops NEW
+exploitation but does not clean an existing compromise. Run this scanner regardless of
+whether you've patched yet.
+
+Checks for BOTH known campaigns: the Rust-based implant (gvfsd-user/fc-cache/chronyd)
+and the second, unrelated PHP web-shell attacker confirmed 2026-09-07. They are
+independent — clearing one does not mean the other isn't present too.
 
 Same checks as scripts/stylesmuggler_scan.sh, structured for machine-readable output
 (JSON) so it can feed a SIEM or ticketing pipeline. Detection only — no remediation.
@@ -34,6 +42,7 @@ IOC_DIR = SCRIPT_DIR.parent / "iocs"
 
 TRIGGER_HEADER_RE = re.compile(r"X[_-](TRACE[_-])?[0-9A-Fa-f]{10,12}")
 RESPONSE_MARKER_RE = re.compile(r"MG[0-9a-f]{16,}::")
+SECOND_ATTACKER_MARKER_RE = re.compile(r"ss[56]_[0-9a-f]{10}")
 PHP_TAG_RE = re.compile(r"<\?php|<\?=")
 C2_IPS = ["99.84.67.186", "209.141.43.95"]
 NTP_C2_DOMAINS = ["ntp.timesync.to", "ntp.synctime.to", "ntp.syncstime.to"]
@@ -279,7 +288,7 @@ def check_hashes(report: ScanReport, home_dirs, suspect_pids):
 def check_poisoned_files(report: ScanReport, magento_root):
     section("Poisoned log/report files")
     if not magento_root:
-        report.info("logs", "No --magento-root given — skipping log/report content scan")
+        report.info("logs", "No --magento-root given — skipping log/report content scan and pub/media web-shell check")
         return
     before = report.hit_count
     targets = [Path(magento_root) / "var/log/system.log", Path(magento_root) / "var/report"]
@@ -298,8 +307,37 @@ def check_poisoned_files(report: ScanReport, magento_root):
                 report.hit("logs", f"Trigger-header artefact found in {f}")
             if RESPONSE_MARKER_RE.search(content):
                 report.hit("logs", f"Execution-proof marker (MG<hex>::...) found in {f} — payload RAN")
+            if SECOND_ATTACKER_MARKER_RE.search(content):
+                report.hit(
+                    "logs",
+                    f"Second-attacker campaign marker (ss5_<hex>/ss6_<hex>) found in {f} — "
+                    f"a SEPARATE, unrelated attacker from the Rust implant; check pub/media too",
+                )
+            if "oast.site" in content:
+                report.hit(
+                    "logs",
+                    f"Reference to oast.site (DNS-exfiltration canary domain) found in {f} — "
+                    f"matches the second attacker's recon-probe pattern",
+                )
     if report.hit_count == before:
-        report.ok("No injected PHP, trigger headers, or execution markers found.")
+        report.ok("No injected PHP, trigger headers, execution markers, or second-attacker campaign markers found.")
+
+    # Second, unrelated attacker's web shell: pub/media should NEVER contain executable
+    # PHP on a correctly configured Magento install.
+    media_dir = Path(magento_root) / "pub/media"
+    if media_dir.is_dir():
+        php_hits = list(media_dir.rglob("*.php"))
+        if php_hits:
+            for f in php_hits:
+                report.hit(
+                    "webshell",
+                    f"PHP file found under pub/media (should never contain executable PHP): {f} — "
+                    f"matches the second, unrelated attacker's web-shell technique",
+                )
+        else:
+            report.ok("No PHP files found under pub/media.")
+    else:
+        report.info("webshell", "pub/media not found under --magento-root — skipping web-shell path check")
 
 
 def check_network(report: ScanReport):
@@ -373,9 +411,10 @@ def main():
     else:
         home_dirs.extend(glob.glob("/home/*"))
 
-    print("StyleSmuggler compromise scanner")
-    print("Built from: Sansec advisory 2026-09-05, updated through 2026-09-07 + community IR.")
-    print("Reference:  https://sansec.io/research/stylesmuggler-0day")
+    print("StyleSmuggler / CVE-2026-75650 compromise scanner")
+    print("Built from: Sansec advisory (2026-09-05, updated through 2026-09-07) + Adobe APSB26-146 + community IR.")
+    print("Reference:  https://sansec.io/research/stylesmuggler-0day  |  https://helpx.adobe.com/security/products/magento/apsb26-146.html")
+    print("Official patch (VULN-39341) exists as of 2026-09-07 — see docs/PATCHING.md. Patching does not clean an existing compromise.")
     print("This is DETECTION ONLY. See docs/INCIDENT_RESPONSE.md before acting on findings.\n")
 
     if os.geteuid() != 0:

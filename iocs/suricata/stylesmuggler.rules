@@ -1,5 +1,7 @@
-# StyleSmuggler — Suricata/Snort-compatible network IDS rules
-# Source: Sansec advisory 2026-09-05 + community IR. See ../../docs/VULNERABILITY.md.
+# StyleSmuggler / CVE-2026-75650 — Suricata/Snort-compatible network IDS rules
+# Source: Sansec advisory 2026-09-05 (updated through 2026-09-07) + Adobe APSB26-146 +
+# community IR. See ../../docs/VULNERABILITY.md. Covers both the Rust-implant campaign
+# and the second, unrelated PHP web-shell attacker (SIDs 7000050+).
 #
 # Adjust $HOME_NET / $EXTERNAL_NET and SIDs (7000000-7000099 is an arbitrary local range
 # — pick a range that doesn't collide with your existing local.rules) to your environment
@@ -52,3 +54,31 @@ alert http $EXTERNAL_NET any -> $HOME_NET any (msg:"STYLESMUGGLER trigger header
 alert http $HOME_NET any -> $EXTERNAL_NET any (msg:"STYLESMUGGLER response execution marker (MG<hex>::...::/MG<hex>)"; flow:to_client,established; file.data; pcre:"/MG[0-9a-f]{16,}::.{0,4096}::\/MG[0-9a-f]{16,}/"; sid:7000023; rev:1; classtype:trojan-activity;)
 
 alert http $EXTERNAL_NET any -> $HOME_NET any (msg:"STYLESMUGGLER known scripted attacker user-agent on /graphql"; flow:to_server,established; http.user_agent; content:"python-requests"; http.uri; content:"/graphql"; sid:7000024; rev:1; classtype:web-application-attack;)
+
+# --- fc-cache/chronyd build: outbound IP self-discovery (informational — these are
+#     legitimate third-party services; the anomaly is a Magento backend calling them) --
+
+alert http $HOME_NET any -> $EXTERNAL_NET 80 (msg:"STYLESMUGGLER informational - outbound IP-lookup call from application host (ipify)"; flow:to_server,established; http.host; content:"api4.ipify.org"; sid:7000040; rev:1; classtype:policy-violation; priority:3;)
+alert http $HOME_NET any -> $EXTERNAL_NET 80 (msg:"STYLESMUGGLER informational - outbound IP-lookup call from application host (icanhazip)"; flow:to_server,established; http.host; content:"ipv4.icanhazip.com"; sid:7000041; rev:1; classtype:policy-violation; priority:3;)
+alert http $HOME_NET any -> $EXTERNAL_NET 80 (msg:"STYLESMUGGLER informational - outbound IP-lookup call from application host (ident.me)"; flow:to_server,established; http.host; content:"ipv4.ident.me"; sid:7000042; rev:1; classtype:policy-violation; priority:3;)
+alert http $HOME_NET any -> $EXTERNAL_NET 80 (msg:"STYLESMUGGLER informational - outbound IP-lookup call from application host (ipinfo.io)"; flow:to_server,established; http.host; content:"ipinfo.io"; sid:7000043; rev:1; classtype:policy-violation; priority:3;)
+
+# =====================================================================================
+# A SECOND, UNRELATED ATTACKER (confirmed 2026-09-07) — different operator, same
+# StyleSmuggler entry point. Drops a PHP web shell via a recon probe that exfiltrates
+# over DNS rather than an HTTP response. See ../../docs/VULNERABILITY.md.
+# =====================================================================================
+
+# The recon probe's DNS exfiltration channel — a generic OOB-canary domain used by many
+# legitimate security tools, so this is a strong signal specifically when it originates
+# from your Magento APPLICATION host, which has no legitimate reason to query it.
+alert dns $HOME_NET any -> any any (msg:"STYLESMUGGLER second-attacker recon probe - DNS exfil to OOB canary domain (oast.site)"; dns.query; content:"oast.site"; nocase; sid:7000050; rev:1; classtype:trojan-activity; reference:url,sansec.io/research/stylesmuggler-0day;)
+
+# The recon probe's cover request: a legitimate-looking storeConfig GraphQL query,
+# used as camouflage while the real payload rides in the Store: header. Matching the
+# GraphQL body pattern alone is noisy (this is a normal storefront query) - only alert
+# when paired with an unusually long or non-standard Store: header value.
+alert http $EXTERNAL_NET any -> $HOME_NET any (msg:"STYLESMUGGLER second-attacker recon probe - storeConfig cover query with oversized Store header"; flow:to_server,established; http.uri; content:"/graphql"; http.request_body; content:"storeConfig"; content:"store_code"; http.header_names; content:"Store"; pcre:"/^Store\x3a\s*.{40,}/Hm"; sid:7000051; rev:1; classtype:web-application-attack;)
+
+# The web-shell path pattern, if a proxy/CDN logs the request URI for static assets
+alert http $EXTERNAL_NET any -> $HOME_NET any (msg:"STYLESMUGGLER second-attacker web shell request pattern (pub/media cache path)"; flow:to_server,established; http.uri; content:"/pub/media/catalog/product/cache/ss_"; sid:7000052; rev:1; classtype:web-application-attack;)

@@ -1,4 +1,4 @@
-# StyleSmuggler C2 / malware-download domains
+# StyleSmuggler / CVE-2026-75650 C2, malware-download, and exfiltration domains
 # Source: Sansec advisory, updated through 2026-09-07. See docs/VULNERABILITY.md.
 # Format: domain[:port]  # role
 
@@ -12,16 +12,35 @@ pool.microsft.studio:123    # C2, custom NTP-shaped traffic (UDP) — note typos
 ## fc-cache / chronyd build C2 (first seen 2026-09-06, NTP-shaped UDP/123 beaconing —
 ## only the first 4 bytes of each packet are genuine NTP; the rest is a chunked
 ## MessagePack record with agent ID, hostname, username, OS/mem/disk info, root status,
-## and implant version, e.g. "2.1.4")
+## and implant version — 2.1.4 for fc-cache, 2.1.5 for chronyd)
 ntp.timesync.to:123         # primary C2 for the fc-cache/chronyd build
 ntp.synctime.to:123         # fallback C2
 ntp.syncstime.to:123        # fallback C2
+
+## fc-cache / chronyd build — plain-HTTP IP self-discovery calls (port 80, truncated
+## User-Agent). These are LEGITIMATE third-party services; the anomaly is a Magento
+## application backend calling them at all. Treat as informational/anomalous-behavior
+## indicators, not malicious infrastructure to block outright — plenty of other
+## software calls these same services legitimately, so alert-and-investigate rather
+## than hard-block if you're not sure nothing else on the host has a legitimate reason to.
+api4.ipify.org:80
+ipv4.icanhazip.com:80
+ipv4.ident.me:80
+ipinfo.io:80
+
+## Second, UNRELATED attacker's recon-probe exfiltration channel (confirmed 2026-09-07)
+## — DNS-based out-of-band exfiltration under the oast.site collaborator/canary service.
+## This is a generic security-tooling domain (used legitimately by many pentest/recon
+## tools), so a hit here is a strong signal only when it originates from your Magento
+## APPLICATION host, which has no legitimate reason to be resolving it:
+*.oast.site                 # DNS queries only — see file_paths.txt for the label format
 
 # CAUTION observed by community responders: two independent packet captures (>200MB
 # each) taken while the gvfsd-user implant was actively running showed ZERO packets to
 # the published C2/download hosts above. One infection instead made 28 simultaneous
 # connections to the store's OWN local Redis (127.0.0.1:6379) and no external traffic
 # at all. Separately, the fc-cache/chronyd build's C2 rides on UDP/123 disguised as NTP
-# traffic — a port most egress filtering treats as harmless and won't alert on. Do not
-# treat a clean capture against this domain list as proof of a clean host — always run
-# the full filesystem/process/cron checks too.
+# traffic — a port most egress filtering treats as harmless and won't alert on, and the
+# second attacker's recon probe exfiltrates over DNS with no HTTP response at all. Do
+# not treat a clean capture against this domain list as proof of a clean host — always
+# run the full filesystem/process/cron checks too.
