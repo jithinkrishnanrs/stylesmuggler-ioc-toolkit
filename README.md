@@ -27,6 +27,7 @@ on **September 5, 2026**, with in-the-wild exploitation confirmed from
 | Vendor | Adobe (Magento Open Source, Adobe Commerce) |
 | CVE | **CVE-2026-75650**, assigned 2026-09-07 |
 | Adobe bulletin | **APSB26-146**, published 2026-09-07 20:20 UTC, **Priority 1** (highest) |
+| Also required | **APSB26-138** — Adobe's regular September 2026 Commerce update, released 2026-09-08. Adobe states VULN-39341 must be applied **in addition to** this, not instead of it. |
 | CVSS | **10.0** (3.1 and 4.0) — Critical |
 | CWE | CWE-1336, Improper Neutralization of Special Elements Used in a Template Engine |
 | Official patch | **Shipped.** Hotfix `VULN-39341`. **Coverage is not universal** — see the table below. |

@@ -36,7 +36,7 @@ if [[ ! -f "$SPOOL" ]]; then
   exit 0
 fi
 
-PATTERN='gvfsd|\.kw_'
+PATTERN='gvfsd|\.kw_|fc-cache|\.fc_|\.fc-|chronyd|\.chrony-|\.cache_|\.gvfsd-'
 MATCHES=$(grep -cE "$PATTERN" "$SPOOL" || true)
 
 if [[ "$MATCHES" -eq 0 ]]; then

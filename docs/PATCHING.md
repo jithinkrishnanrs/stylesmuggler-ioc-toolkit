@@ -5,12 +5,19 @@ it yet, this is now your top priority — ahead of the interim mitigations in
 [`../mitigations/`](../mitigations/), which were only ever a stopgap for the period
 before a real fix existed.
 
+> **You also need Adobe's regular September 2026 update.** Adobe released its scheduled
+> monthly Commerce security update, **APSB26-138**, on **2026-09-08** — separately from
+> the StyleSmuggler hotfix. Adobe's own guidance is that **VULN-39341 must be applied in
+> addition to APSB26-138**, not instead of it. Applying only one of the two leaves you
+> exposed. Check both bulletins and apply both.
+
 ## Identifiers
 
 | | |
 |---|---|
 | CVE | CVE-2026-75650 |
-| Adobe bulletin | [APSB26-146](https://helpx.adobe.com/security/products/magento/apsb26-146.html) |
+| Adobe bulletin (StyleSmuggler-specific) | [APSB26-146](https://helpx.adobe.com/security/products/magento/apsb26-146.html) |
+| Adobe's regular September 2026 update | **APSB26-138** (released 2026-09-08) — apply this **in addition to** VULN-39341, not instead of it |
 | Adobe priority | **Priority 1** (highest — Adobe's guidance is to patch immediately) |
 | CVSS 3.1 / 4.0 | **10.0** (Critical) |
 | CWE | CWE-1336, Improper Neutralization of Special Elements Used in a Template Engine |
@@ -78,19 +85,24 @@ community as of this writing.
 ## If you had an interim/community containment patch installed
 
 Some responders shipped their own stopgap code changes before Adobe's official fix
-existed — commonly touching two things:
+existed. One documented community mitigation (from the Disrex Group) modifies **three
+of Magento's DI code scanners**, including
+`setup/src/Magento/Setup/Module/Di/Code/Scanner/ArrayScanner.php`, so they only execute
+from the PHP CLI (i.e. during a normal `setup:di:compile` run) rather than also being
+reachable through the web-facing render path StyleSmuggler abuses. Other responders
+instead patched the failed-payment email handler and the logging layer directly. Verify
+which approach (if any) is present on a given host:
 
-- `PaymentFailuresService::handle()`, returning before rendering (disabling the
-  failed-payment email entirely as a side effect, while the interim patch was in place).
-- The logging handler that writes `var/log/system.log`, adding escaping for PHP open
-  tags on the formatted line so a poisoned log file can't be `include()`d as PHP even
-  if the DI scanner reaches it.
+```bash
+grep -c 'StyleSmuggler mitigation' \
+  setup/src/Magento/Setup/Module/Di/Code/Scanner/ArrayScanner.php
+```
 
 **These interim patches are superseded by Adobe's official hotfix.** If you applied
-one, plan to revert it before or as part of applying VULN-39341, rather than stacking
-an unofficial patch under an official one — test the transition on staging. Re-enable
-the failed-payment email once you've confirmed the official patch is in place and
-verified (see below), if you disabled it as part of an interim patch.
+one, plan to revert it before or as part of applying VULN-39341 (and APSB26-138),
+rather than stacking an unofficial patch under an official one — test the transition on
+staging. Re-enable the failed-payment email once you've confirmed the official patch is
+in place and verified, if you disabled it as part of an interim patch.
 
 ## Verifying the patch is actually applied
 
@@ -120,3 +132,18 @@ already there. Run the compromise scanner and follow
 patch.** Patch first if you're not yet compromised (or don't know); if you find
 evidence of compromise, follow the incident-response evidence-preservation steps before
 you start changing things, including before applying the hotfix on that specific host.
+
+## Recommended sequencing after applying the hotfix
+
+Once VULN-39341 (and APSB26-138) are applied and verified:
+
+1. Enable maintenance mode.
+2. Suspend cron jobs (`bin/magento cron:disable` or equivalent for your setup) so no
+   in-flight cron process reintroduces something you're about to clean up.
+3. Run the full incident-response evidence/cleanup process if you found any indicator
+   — see [`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md).
+4. Rotate credentials (Section 11 of that playbook) — do this after containment, not
+   before, since rotating while an attacker still has active execution just exposes the
+   new credentials too.
+5. Re-enable cron and take the store out of maintenance mode once you've verified the
+   host is clean.

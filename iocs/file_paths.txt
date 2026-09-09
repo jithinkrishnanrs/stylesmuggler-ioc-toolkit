@@ -17,21 +17,44 @@
 # fc-cache build (first seen 2026-09-06, version 2.1.4, process fc-cache — arm64 and x86-64 builds)
 ~/.cache/fontconfig/fc-cache
 /tmp/.fc_<8hex>.lock             # <8hex> is the first half of the implant's agent ID
+/tmp/.fc-<8hex>/fc-cache         # variant: hyphenated subdirectory
+/tmp/fc-cache                    # variant: dropped directly in /tmp, no subdirectory
+/tmp/.cache_<random>             # variant naming seen alongside fc-cache drops
 
 # chronyd build (first seen 2026-09-07, version 2.1.5, process chronyd — observed
 # re-dropped on a host already running the fc-cache build, with the SAME agent ID and
 # incremented version: same operator, new disguise)
 /tmp/.chrony-<8hex>/chronyd
+/tmp/.gvfsd-<random>             # variant naming seen alongside chronyd drops (hyphen, not underscore — distinct from /tmp/.gvfsd_<8hex>.lock above)
 
 ## Cron persistence — written DIRECTLY to the spool file, not via `crontab`, so it does
 ## not generate the REPLACE line syslog normally logs on a crontab change.
 ## File: /var/spool/cron/crontabs/<user>
 */5 * * * * exec <home>/.local/share/.gvfsd/gvfsd-user   # gvfsd-user build: every 5 min
 */5 * * * * exec /tmp/.kw_                                # variant seen pointing at /tmp directly
-13,43 * * * * exec <home>/.cache/fontconfig/fc-cache      # fc-cache build: twice/hour — easy to miss
+13,43 * * * * <home>/.cache/fontconfig/fc-cache >/dev/null 2>&1   # fc-cache build: twice/hour — easy to miss
+57,27 * * * * /tmp/.chrony-<8hex>/chronyd >/dev/null 2>&1         # chronyd build: twice/hour, different offset
 # Observed duplicated up to 1728 times in one crontab; self-restores within ~1 second of
 # manual removal if the process/binary itself hasn't been cleaned first. Clean order:
 # persistence -> process -> binary -> re-check persistence after a full cron cycle.
+# IMPORTANT: the chronyd build has also been observed relaunching with NO cron entry at
+# all — an empty crontab is NOT proof of a clean host. Also check for other persistence
+# mechanisms (systemd user timers, shell startup files, PHP auto_prepend_file) below.
+
+## Failed cron-write indicator — on hosts where the web/site user isn't permitted to
+## write a crontab, the implant's repeated attempts can leave a distinctive log trail:
+grep -Rni 'crontab command not allowed' /var/log/ 2>/dev/null
+# Repeated hits for the Magento/web-server user are a strong reason to investigate
+# further even if you find no cron entry or dropped binary.
+
+## Other persistence mechanisms to check — not confirmed StyleSmuggler-specific, but
+## standard places an attacker with the site user's code-execution would plant a
+## fallback, and worth ruling out before declaring a host clean:
+~/.config/systemd/user/                # user-level systemd timers/services
+/etc/cron.d/ /etc/cron.hourly/ /etc/cron.daily/ /etc/cron.weekly/ /etc/cron.monthly/
+~/.ssh/authorized_keys                 # check every key is accounted for
+~/.bashrc ~/.bash_profile ~/.profile ~/.zshrc     # check for curl/wget/base64/tmp-path additions
+.user.ini / .htaccess / php.ini        # check for injected auto_prepend_file / auto_append_file
 
 ## Process masquerade — three known disguises, all legitimate-sounding system process
 ## names. Check OWNERSHIP (non-root uid) and, where possible, compare against the real
@@ -149,3 +172,14 @@ pub/media/                           # reported location for dropped PHP webshel
 pub/static/                          # reported location for dropped PHP webshells
 <theme_dir>/                         # reported location for dropped PHP webshells
 admin_user (database table)          # check for an unexpected/rogue admin account
+
+## Database forensic queries (not StyleSmuggler-specific signatures, but standard
+## places to check for persistence or injected content after any confirmed compromise
+## of the Magento application user):
+SELECT user_id, username, email, created, logdate, is_active FROM admin_user ORDER BY created DESC;
+SELECT integration_id, name, created_at, status FROM integration;
+SELECT * FROM oauth_token ORDER BY created_at DESC LIMIT 20;
+SELECT config_id, scope, scope_id, path, LEFT(value,300) FROM core_config_data
+  WHERE value LIKE '%<script%' OR value LIKE '%eval(%' OR value LIKE '%atob(%' OR value LIKE '%fromCharCode%';
+SELECT identifier, update_time FROM cms_block WHERE update_time > NOW() - INTERVAL 30 DAY ORDER BY update_time DESC;
+SELECT identifier, update_time FROM cms_page WHERE update_time > NOW() - INTERVAL 30 DAY ORDER BY update_time DESC;

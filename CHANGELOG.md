@@ -7,8 +7,44 @@ adoption play out.
 
 ## [Unreleased]
 - Watching for: further variants of the second, unrelated web-shell attacker; any
-  additional implant version bumps beyond `fc-cache` 2.1.4 / `chronyd` 2.1.5; official
+  additional implant version bumps beyond `fc-cache` 2.1.4 / `chronyd` 2.1.5; expanded
   Adobe patch coverage for versions below the currently supported floor.
+
+## 2026-09-08 — APSB26-138 requirement, additional filename variants, deeper IR guidance
+Corroborating community write-ups (published 2026-09-07/08) added detail beyond
+Sansec's advisory that materially changes what a thorough check/cleanup looks like:
+
+- **Adobe's regular September 2026 Commerce update, APSB26-138, was released
+  2026-09-08.** Adobe's own guidance is that hotfix VULN-39341 must be applied **in
+  addition to** APSB26-138, not instead of it. Reflected in `README.md` and
+  `docs/PATCHING.md`.
+- Additional observed filename variants for the Rust implant: `/tmp/.gvfsd-*` (hyphen),
+  `/tmp/.cache_*`, `/tmp/.fc-<8hex>/fc-cache` (hyphenated subdirectory), and
+  `/tmp/fc-cache` (dropped directly in `/tmp`, no subdirectory). Added to
+  `iocs/file_paths.txt` and both scanners, tested against planted indicators.
+- Confirmed `chronyd` build cron schedule: `57,27 * * * *` (twice hourly, different
+  offset from the `fc-cache` build's `13,43 * * * *`). Also confirmed: the `chronyd`
+  build has been observed **relaunching with no cron entry at all** — an empty
+  crontab is not proof of a clean host. Both scanners now also check systemd user
+  timers, PHP `auto_prepend_file`/`auto_append_file` hooks, and a
+  `crontab command not allowed` log indicator as additional persistence signals.
+- `docs/INCIDENT_RESPONSE.md` significantly expanded: UDP-socket capture and
+  `lsof`-based Redis-port discovery for process evidence (one confirmed infection
+  showed no external C2 connection, only local Redis traffic); a full database
+  forensics pass (`admin_user`, `integration`, `oauth_token`, `core_config_data`,
+  `cms_block`/`cms_page`); SSH `authorized_keys` and shell-startup-file checks;
+  git-based unauthorized-change detection; scoped `redis-cli ... FLUSHDB` guidance in
+  place of a blanket `FLUSHALL` that would affect other applications on a shared
+  Redis instance.
+- `docs/PATCHING.md`: corrected the interim community-patch description (it modifies
+  three of Magento's DI code scanners, not one) and added recommended post-patch
+  sequencing (maintenance mode → suspend cron → run IR playbook → rotate credentials
+  → resume service).
+- Housekeeping: repository git history was reset to a single clean commit so no
+  removed/superseded file (including an earlier, since-deleted publishing-instructions
+  file) remains recoverable from history. Nothing in this repository is addressed to
+  any AI assistant or tool — all guidance is written for the person operating the
+  store.
 
 ## 2026-09-07 (evening) — Adobe ships CVE-2026-75650 / APSB26-146, second attacker found
 This is the big one: Adobe assigned a CVE, published a Priority 1 bulletin, and shipped

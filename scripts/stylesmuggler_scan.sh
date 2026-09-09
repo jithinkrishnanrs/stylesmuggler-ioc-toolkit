@@ -102,18 +102,55 @@ done
 for lock in /tmp/.gvfsd_*.lock; do
   [[ -e "$lock" ]] && hit "Implant lock file (second location, gvfsd-user build): $lock"
 done
+for gv in /tmp/.gvfsd-*; do
+  [[ -e "$gv" ]] && hit "Implant artefact variant (gvfsd-user build, hyphenated naming): $gv"
+done
 for kw in /tmp/.kw_*; do
   [[ -e "$kw" ]] && hit "Implant artefact (gvfsd-user build): $kw"
+done
+for c in /tmp/.cache_*; do
+  [[ -e "$c" ]] && hit "Implant artefact variant (naming seen alongside fc-cache drops): $c"
 done
 for lock in /tmp/.fc_*.lock; do
   [[ -e "$lock" ]] && hit "Implant lock file (fc-cache build): $lock"
 done
+for fcd in /tmp/.fc-*; do
+  [[ -e "$fcd/fc-cache" ]] && hit "Implant binary present (fc-cache build, hyphenated subdir): $fcd/fc-cache"
+done
+if [[ -e /tmp/fc-cache ]]; then
+  hit "Implant binary present (fc-cache build, dropped directly in /tmp): /tmp/fc-cache"
+fi
 for chrony in /tmp/.chrony-*; do
   [[ -e "$chrony/chronyd" ]] && hit "Implant binary present (chronyd build): $chrony/chronyd"
 done
 
 if [[ $FINDINGS -eq 0 ]]; then
-  ok "No known persistence file paths found under checked home directories or /tmp (checked gvfsd-user, fc-cache, and chronyd build locations)."
+  ok "No known persistence file paths found under checked home directories or /tmp (checked gvfsd-user, fc-cache, and chronyd build locations, including known filename variants)."
+fi
+
+# ---------------------------------------------------------------------------
+# 1b. Other persistence mechanisms — not confirmed StyleSmuggler-specific, but the
+#    chronyd build has been observed relaunching with NO cron entry at all, so an
+#    empty crontab is not proof of a clean host. Check these before moving on.
+# ---------------------------------------------------------------------------
+section "Other persistence mechanisms (systemd timers, PHP hooks, shell startup)"
+
+if command -v systemctl >/dev/null 2>&1; then
+  timers=$(systemctl --user list-timers --all 2>/dev/null | grep -v "^$" | tail -n +2)
+  [[ -n "$timers" ]] && info "User-level systemd timers present — review manually: run 'systemctl --user list-timers --all'"
+fi
+for h in "${CANDIDATE_HOMES[@]}"; do
+  [[ -d "$h/.config/systemd/user" ]] && info "User systemd unit directory exists at $h/.config/systemd/user — review manually for unexpected units"
+done
+for h in "${CANDIDATE_HOMES[@]}"; do
+  for f in "$h/.user.ini" "$h/.htaccess"; do
+    if [[ -f "$f" ]] && grep -qE 'auto_prepend_file|auto_append_file' "$f" 2>/dev/null; then
+      hit "PHP auto-execution hook (auto_prepend_file/auto_append_file) found in $f — review manually, this can be a persistence mechanism independent of the named implant builds"
+    fi
+  done
+done
+if grep -Rniq 'crontab command not allowed' /var/log/ 2>/dev/null; then
+  hit "'crontab command not allowed' found in system logs — suggests a repeated failed attempt to write a crontab, consistent with implant persistence on a host where the site user can't write cron"
 fi
 
 # ---------------------------------------------------------------------------
@@ -123,7 +160,7 @@ fi
 # ---------------------------------------------------------------------------
 section "Cron persistence"
 
-CRON_PATTERN='gvfsd|\.kw_|fc-cache|\.fc_|chronyd|\.chrony-'
+CRON_PATTERN='gvfsd|\.kw_|fc-cache|\.fc_|\.fc-|chronyd|\.chrony-|\.cache_|\.gvfsd-'
 
 check_crontab_output() {
   local label="$1" content="$2"

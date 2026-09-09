@@ -45,9 +45,43 @@ ps -o pid,ppid,user,lstart,cmd -p $PID > /root/evidence/proc_${PID}_meta.txt
 ls -la /proc/$PID/cwd /proc/$PID/exe 2>/dev/null >> /root/evidence/proc_${PID}_meta.txt
 cat /proc/$PID/status >> /root/evidence/proc_${PID}_meta.txt
 
-# Open sockets for this process
+# Open sockets for this process — check UDP as well as TCP; the fc-cache/chronyd
+# build's C2 rides on UDP/123 disguised as NTP traffic
 ss -tnp 2>/dev/null | grep "pid=$PID" > /root/evidence/proc_${PID}_sockets.txt
+ss -unp 2>/dev/null | grep "pid=$PID" >> /root/evidence/proc_${PID}_sockets.txt
+lsof -nP -p "$PID" > /root/evidence/proc_${PID}_lsof.txt 2>/dev/null
 ```
+
+**Don't trust a process name alone — including `fc-cache` or `chronyd` matching the
+legitimate system utility.** Real kernel workers run as root with PPID 2; real
+`fc-cache`/`chronyd` run from `/usr/bin/fc-cache` or `/usr/sbin/chronyd`. Confirm the
+actual executable before deciding a match is benign:
+
+```bash
+readlink -f /proc/$PID/exe
+```
+
+**One confirmed infection showed no external C2 connection at all** — the suspicious
+process instead had several established connections to the store's own Redis instance.
+If a suspicious PID's socket list shows a local port you don't recognize, identify what
+it belongs to before assuming it's benign:
+
+```bash
+lsof -nP -iTCP:<PORT>          # what's listening/connected on that port
+ss -ltnp | grep ':<PORT>'      # alternative if lsof isn't available
+```
+
+If you suspect NTP-shaped C2 traffic on UDP/123 and want to confirm rather than infer,
+a short capture can help (adjust interface/timeout, and be mindful this captures live
+traffic — treat the capture file as sensitive evidence, same as anything else here):
+
+```bash
+sudo timeout 70 tcpdump -ni any -nn 'udp port 123'
+```
+
+Legitimate NTP traffic also uses UDP/123 — the process, destination, and pattern all
+matter together; don't whitelist a connection solely because the process is named
+`chronyd`.
 
 Also preserve:
 
@@ -99,19 +133,38 @@ Order matters. Persistence re-adds itself if you kill the process first.
 
 1. **Remove persistence first:**
    ```bash
-   crontab -l -u <user> | grep -v -E 'gvfsd|\.kw_|fc-cache|\.fc_|chronyd|\.chrony-' | crontab -u <user> -
+   crontab -l -u <user> | grep -v -E 'gvfsd|\.kw_|fc-cache|\.fc_|\.fc-|chronyd|\.chrony-|\.cache_|\.gvfsd-' | crontab -u <user> -
    # Also check the spool file directly — some variants bypass `crontab` entirely
-   sudo sed -i '/gvfsd/d;/\.kw_/d;/fc-cache/d;/\.fc_/d;/chronyd/d;/\.chrony-/d' /var/spool/cron/crontabs/<user>
+   sudo sed -i '/gvfsd/d;/\.kw_/d;/fc-cache/d;/\.fc_/d;/\.fc-/d;/chronyd/d;/\.chrony-/d' /var/spool/cron/crontabs/<user>
+   sudo grep -RniE 'gvfsd|fc-cache|chronyd|\.chrony-|\.cache/fontconfig' /var/spool/cron* /etc/cron* 2>/dev/null
+   ```
+   **The `chronyd` build has been observed relaunching with no cron entry at all** — an
+   empty crontab is not proof this step is done. Also check other persistence
+   mechanisms before moving on:
+   ```bash
+   # User-level systemd timers/services
+   systemctl --user list-timers --all 2>/dev/null
+   ls -la ~/.config/systemd/user/ 2>/dev/null
+   # System cron directories beyond the user's own crontab
+   ls -la /etc/cron.d/ /etc/cron.daily/ /etc/cron.hourly/ /etc/cron.weekly/ /etc/cron.monthly/ 2>/dev/null
+   # PHP-level auto-execution hooks
+   grep -rn 'auto_prepend_file\|auto_append_file' .user.ini .htaccess /etc/php*/ 2>/dev/null
+   # Unexplained SSH keys or shell-startup additions
+   cat ~/.ssh/authorized_keys 2>/dev/null
+   grep -nE 'curl|wget|base64|/tmp/\.|gvfsd|kworker|fc-cache|chronyd|\.chrony-' \
+     ~/.bashrc ~/.bash_profile ~/.profile ~/.zshrc ~/.bash_login 2>/dev/null
    ```
 2. **Then kill the process(es):**
    ```bash
    sudo kill -9 <pid>
    watch -n 0.5 'ps auxf | grep -iE "kworker|fc-cache|chronyd"'   # confirm it does not respawn, ~60s
    ```
-3. **Remove the on-disk binary and locks (check all three known builds):**
+3. **Remove the on-disk binary and locks (check all three known builds and their
+   filename variants):**
    ```bash
    rm -rf ~/.local/share/.gvfsd/ ~/.cache/fontconfig/fc-cache
-   rm -rf /tmp/.kw_* /tmp/.gvfsd_* /tmp/.fc_*.lock /tmp/.chrony-*
+   rm -rf /tmp/.kw_* /tmp/.cache_* /tmp/.gvfsd_* /tmp/.gvfsd-* \
+          /tmp/.fc_*.lock /tmp/.fc-*/fc-cache /tmp/fc-cache /tmp/.chrony-*
    ```
 4. **Check the crontab again** after a full cron cycle (at least 5–10 minutes, ideally
    longer) — confirmed re-appended entries have been observed even after apparent
@@ -123,9 +176,30 @@ Order matters. Persistence re-adds itself if you kill the process first.
    # Review each hit before deleting — capture a copy for evidence first (Step 2).
    # The specific known pattern:
    find pub/media/catalog/product/cache -path '*/ss_*/sync_*.php' -delete
+   # Attackers change filenames — don't restrict future checks to this exact pattern,
+   # and also sweep for recently modified PHP anywhere in the codebase:
+   find app vendor pub -type f -name '*.php' -newermt '30 days ago' 2>/dev/null
    ```
 6. **Clean the poisoned log/report files** (`var/log/system.log`, `var/report/<hash>`)
    only *after* you've captured the copies you want for evidence.
+7. **Check the Magento database for persistence or tampering** that the exploited site
+   user could have written directly:
+   ```sql
+   SELECT user_id, username, email, created, logdate, is_active
+     FROM admin_user ORDER BY created DESC;                      -- rogue admin accounts
+   SELECT integration_id, name, created_at, status FROM integration;
+   SELECT * FROM oauth_token ORDER BY created_at DESC LIMIT 20;
+   SELECT config_id, scope, scope_id, path, LEFT(value,300) FROM core_config_data
+     WHERE value LIKE '%<script%' OR value LIKE '%eval(%'
+        OR value LIKE '%atob(%'   OR value LIKE '%fromCharCode%'; -- injected JS
+   SELECT identifier, update_time FROM cms_block
+     WHERE update_time > NOW() - INTERVAL 30 DAY ORDER BY update_time DESC;
+   SELECT identifier, update_time FROM cms_page
+     WHERE update_time > NOW() - INTERVAL 30 DAY ORDER BY update_time DESC;
+   ```
+   None of these queries are StyleSmuggler-specific signatures — they're standard places
+   to look for persistence or injected storefront content after any confirmed
+   compromise of the Magento application user.
 
 ## Step 4 — recover trust
 
@@ -136,11 +210,17 @@ attacker still has active execution just hands them the new ones too.
 
 - **Flush session storage** entirely, whichever backend you use — this logs out every
   customer and admin, which is the point, since the implant has been observed reading
-  session data directly:
+  session data directly. Identify the exact Redis database first rather than reaching
+  for a blanket flush — `FLUSHALL` on a shared Redis instance takes down every other
+  application using it too:
   ```bash
-  redis-cli flushall                         # Redis-backed sessions
-  rm -f "$MAGENTO_ROOT"/var/session/sess_*   # file-backed sessions
-  # DELETE FROM session;                     # DB-backed sessions
+  grep -nA40 "'cache'" app/etc/env.php
+  grep -nA30 "'session'" app/etc/env.php
+  # Note the host, port/socket, and database index for cache, page-cache, and session
+  # from the output above, then target that specific database:
+  redis-cli -h <HOST> -p <PORT> -n <SESSION_DB> FLUSHDB   # Redis-backed sessions — scoped, not FLUSHALL
+  rm -f "$MAGENTO_ROOT"/var/session/sess_*                 # file-backed sessions
+  # DELETE FROM session;                                   # DB-backed sessions
   ```
 - **Rotate the Magento `crypt/key`** in `app/etc/env.php`. This re-encrypts stored
   secrets (including saved payment tokens), so plan the rotation carefully — don't just
@@ -172,6 +252,16 @@ attacker still has active execution just hands them the new ones too.
   is the only thing that closes the underlying sink itself.
 - If cardholder data may have been accessible, assess PCI-DSS breach notification
   obligations as part of this step, not as an afterthought.
+- If your project is stored in Git, use it to spot unauthorized changes before you
+  decide the codebase itself is clean:
+  ```bash
+  git status --short
+  git diff --stat
+  git ls-files --others --exclude-standard | grep -E '\.(php|phtml)$'   # untracked PHP/PHTML
+  ```
+  Pay particular attention to anything unexpected under `app/code`, `vendor`, `pub`, and
+  `setup`. Don't assume reinstalling `vendor/` alone solves the problem — the implant
+  runs as the Unix site user and isn't limited to Magento's own PHP code.
 
 ## Step 5 — harden against recurrence
 

@@ -46,7 +46,7 @@ SECOND_ATTACKER_MARKER_RE = re.compile(r"ss[56]_[0-9a-f]{10}")
 PHP_TAG_RE = re.compile(r"<\?php|<\?=")
 C2_IPS = ["99.84.67.186", "209.141.43.95"]
 NTP_C2_DOMAINS = ["ntp.timesync.to", "ntp.synctime.to", "ntp.syncstime.to"]
-CRON_PATTERN = re.compile(r"gvfsd|\.kw_|fc-cache|\.fc_|chronyd|\.chrony-")
+CRON_PATTERN = re.compile(r"gvfsd|\.kw_|fc-cache|\.fc_|\.fc-|chronyd|\.chrony-|\.cache_|\.gvfsd-")
 SYSTEM_PATH_PREFIXES = ("/usr", "/sbin", "/bin", "/lib")
 STANDARD_TIME_USERS = {"root", "chrony", "_chrony", "systemd-timesync"}
 
@@ -126,10 +126,20 @@ def check_filesystem(report: ScanReport, home_dirs):
             )
     for lock in glob.glob("/tmp/.gvfsd_*.lock"):
         report.hit("filesystem", f"Implant lock file (second location, gvfsd-user build): {lock}")
+    for gv in glob.glob("/tmp/.gvfsd-*"):
+        report.hit("filesystem", f"Implant artefact variant (gvfsd-user build, hyphenated naming): {gv}")
     for kw in glob.glob("/tmp/.kw_*"):
         report.hit("filesystem", f"Implant artefact (gvfsd-user build): {kw}")
+    for c in glob.glob("/tmp/.cache_*"):
+        report.hit("filesystem", f"Implant artefact variant (naming seen alongside fc-cache drops): {c}")
     for lock in glob.glob("/tmp/.fc_*.lock"):
         report.hit("filesystem", f"Implant lock file (fc-cache build): {lock}")
+    for fcd in glob.glob("/tmp/.fc-*"):
+        fc_bin = Path(fcd) / "fc-cache"
+        if fc_bin.exists():
+            report.hit("filesystem", f"Implant binary present (fc-cache build, hyphenated subdir): {fc_bin}")
+    if Path("/tmp/fc-cache").exists():
+        report.hit("filesystem", "Implant binary present (fc-cache build, dropped directly in /tmp): /tmp/fc-cache")
     for chrony_dir in glob.glob("/tmp/.chrony-*"):
         chronyd_bin = Path(chrony_dir) / "chronyd"
         if chronyd_bin.exists():
@@ -137,8 +147,45 @@ def check_filesystem(report: ScanReport, home_dirs):
     if report.hit_count == before:
         report.ok(
             "No known persistence file paths found under checked home directories or /tmp "
-            "(checked gvfsd-user, fc-cache, and chronyd build locations)."
+            "(checked gvfsd-user, fc-cache, and chronyd build locations, including known filename variants)."
         )
+
+    # Other persistence mechanisms — the chronyd build has been observed relaunching
+    # with NO cron entry at all, so these are worth checking regardless of cron state.
+    section("Other persistence mechanisms (systemd timers, PHP hooks, shell startup)")
+    for h in candidates:
+        systemd_dir = Path(h) / ".config/systemd/user"
+        if systemd_dir.is_dir():
+            report.info(
+                "persistence",
+                f"User systemd unit directory exists at {systemd_dir} — review manually for unexpected units",
+            )
+        for hook_file in (Path(h) / ".user.ini", Path(h) / ".htaccess"):
+            if hook_file.is_file():
+                try:
+                    content = hook_file.read_text(errors="ignore")
+                    if "auto_prepend_file" in content or "auto_append_file" in content:
+                        report.hit(
+                            "persistence",
+                            f"PHP auto-execution hook (auto_prepend_file/auto_append_file) found in "
+                            f"{hook_file} — review manually, independent of the named implant builds",
+                        )
+                except (OSError, PermissionError):
+                    pass
+    try:
+        out = subprocess.run(
+            ["grep", "-Rni", "crontab command not allowed", "/var/log/"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            report.hit(
+                "persistence",
+                "'crontab command not allowed' found in system logs — suggests a repeated "
+                "failed attempt to write a crontab, consistent with implant persistence on a "
+                "host where the site user can't write cron",
+            )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        pass
 
 
 def check_cron(report: ScanReport):
