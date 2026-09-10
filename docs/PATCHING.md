@@ -42,14 +42,36 @@ fix**, even though you are just as exploitable as a supported install. Options:
 1. Upgrade to a supported version (2.4.6+) — the durable fix, but not instant.
 2. Apply the interim mitigations in [`../mitigations/`](../mitigations/) as a stopgap
    while you plan an upgrade — these reduce exposure but do not close the vulnerability.
-3. Some third parties (e.g. scandiweb, per public reporting) have built unofficial
-   backports covering older EOL lines (reportedly as far back as 2.2.0). This repo does
-   **not** redistribute or endorse any specific third-party patch — evaluate the
-   source, test thoroughly on staging, and understand you're trusting an unofficial
-   reconstruction of a fix for a CVSS 10.0 RCE. Search for current options rather than
-   relying on any link here going stale.
+3. Reported third-party unofficial backports for older EOL lines, per public coverage
+   as of this writing (verify current availability yourself, and treat all of the
+   caveats below as applying to each):
+   - **Scandiweb** has reportedly published **41 version-specific backport patches**
+     covering Magento **2.2.0 through 2.4.3-p3**, together with credential-rotation
+     guidance.
+   - **BigBridge** published a differently-scoped **root-cause** community patch (see
+     "Root cause, more precisely" in [`VULNERABILITY.md`](VULNERABILITY.md)) with
+     ready-to-apply patches for **2.4.5–2.4.9**, installable via
+     `cweagans/composer-patches`.
+   - **Graycore**'s `magento2-style-smuggler-patch` module hardens three specific
+     points in the chain (the email template `{{block}}` directive, the grid row URL
+     generator factory, and Web API fatal-error report escaping) — its own
+     documentation is explicit that this is **hardening, not a fix**, and that other
+     paths through the vulnerability remain open.
+   This repo does **not** redistribute or endorse any specific third-party patch —
+   evaluate the source, test thoroughly on staging, and understand you're trusting an
+   unofficial reconstruction of a fix for a CVSS 10.0 RCE. Search for current options
+   rather than relying on any name or link here going stale.
 
-## Getting the official hotfix
+### If you run Mage-OS
+
+Mage-OS shipped **version 3.5.0** as an emergency security release that ports the
+StyleSmuggler hotfix with additional hardening, bundles the equivalent of Adobe's
+September APSB26-138 update, and fixes four unrelated bugs. If you're on Mage-OS,
+upgrading to 3.5.0 (or later) is very likely your most direct path rather than trying
+to apply Adobe's Commerce-specific hotfix package by hand — verify against Mage-OS's
+own release notes before assuming version-number parity with what's described here.
+
+## Getting the official hotfix (Adobe Commerce / Magento Open Source)
 
 1. The patch is distributed through Adobe's Magento package repository at
    `repo.magento.com`, as `VULN-39341-composer-patches.zip`. This requires valid Adobe
@@ -62,25 +84,38 @@ fix**, even though you are just as exploitable as a supported install. Options:
    is set up. If you don't already have one of these tools wired into your Magento
    project, set that up first — it's also how you'll receive future hotfixes faster.
 
-### Community delivery packages
+### Community delivery packages for the official patch
 
 Because Adobe ships VULN-39341 as raw patch files rooted at the Magento project (not as
 a normal per-package Composer patch), it doesn't apply cleanly through
 `cweagans/composer-patches` out of the box for every project layout. Community members
-(notably the Disrex Group) have published Composer-installable wrapper packages that
-repackage Adobe's *official* patch content for easier application:
+have published Composer-installable wrapper packages that repackage Adobe's *official*
+patch content for easier application — evaluate any such package the same way you
+would any third-party dependency: check who publishes it, pin the version, and verify
+the resulting diff matches what Adobe's own KB describes before trusting it in
+production. This repo does not vouch for any specific third-party package; search for
+current options rather than relying on any name here going stale, since new packages
+have already appeared and changed within days of the original disclosure.
 
-- `disrex/stylesmuggler-adobe-patches` — for standard Magento 2.4.9-line projects.
-- `disrex/stylesmuggler-adobe-patches-mageos` — for Mage-OS projects on the equivalent
-  release line.
+## Interim application-layer guard modules (pre-official-patch stopgaps)
 
-These packages carry Adobe's own patch content (not MIT-licensed — the wrapper tooling
-is, the patch itself isn't), applied via `cweagans/composer-patches`. If you use one,
-treat it the same as any third-party dependency: check who publishes it, pin the
-version, and verify the resulting diff matches what Adobe's own KB describes before
-trusting it in production. This repo does not vouch for any specific third-party
-package beyond noting it exists and is a commonly cited option in the response
-community as of this writing.
+Separately from wrappers around Adobe's own patch, several independent community
+modules were published as **stopgaps before the official fix existed** — install one
+only if you cannot yet apply VULN-39341/APSB26-138, and remove it afterward:
+
+- A **Disrex Group** interim application-layer guard module was published as a
+  Magento 2 module intended to be removed once Adobe ships a fix — i.e. treat it as
+  superseded now that VULN-39341 exists.
+- **Graycore**'s `magento2-style-smuggler-patch` (noted above) is explicitly documented
+  by its author as hardening only, "not a fix," with other paths through the
+  vulnerability remaining open — its own README states a vulnerable store may already
+  be compromised and that mitigating the entry point does not remove an existing
+  backdoor.
+
+Every one of these interim modules predates, and is superseded by, Adobe's official
+hotfix. If you installed one during the gap before Sept 7, plan to remove it as part of
+applying the official patch, the same way you would revert a hand-rolled interim patch
+(see below).
 
 ## If you had an interim/community containment patch installed
 
@@ -142,8 +177,13 @@ Once VULN-39341 (and APSB26-138) are applied and verified:
    in-flight cron process reintroduces something you're about to clean up.
 3. Run the full incident-response evidence/cleanup process if you found any indicator
    — see [`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md).
-4. Rotate credentials (Section 11 of that playbook) — do this after containment, not
-   before, since rotating while an attacker still has active execution just exposes the
-   new credentials too.
+4. **Rotate every secret the site user could have read** — do this after containment,
+   not before, since rotating while an attacker still has active execution just exposes
+   the new credentials too. Per Adobe's own post-hotfix guidance, this explicitly
+   includes: administrator passwords, GraphQL integration tokens, OAuth client secrets,
+   payment gateway API credentials, database credentials, SSH keys, and any other API
+   keys stored in the application. See Step 4 of
+   [`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md) for the full list and specific
+   commands (including the Magento `crypt/key` in `app/etc/env.php`).
 5. Re-enable cron and take the store out of maintenance mode once you've verified the
    host is clean.

@@ -48,7 +48,9 @@ on **September 5, 2026**, with in-the-wild exploitation confirmed from
 | Magento Open Source | **2.4.6 – 2.4.9 only** | 2.4.5 and below |
 
 If you're on an older, unsupported version, Adobe is not shipping you a fix even though
-you're just as exploitable. See [`docs/PATCHING.md`](docs/PATCHING.md) for your options.
+you're just as exploitable. See [`docs/PATCHING.md`](docs/PATCHING.md) for your options
+— including a note for **Mage-OS** users, who have a dedicated emergency release
+(3.5.0) rather than Adobe's Commerce-specific hotfix package.
 
 **This information changes fast.** Cross-check against the primary sources before
 acting: [Sansec's advisory](https://sansec.io/research/stylesmuggler-0day) and
@@ -213,11 +215,13 @@ mitigations/             nginx / Apache / ModSecurity / fail2ban rules
 
 ## Frequently searched terms
 
-CVE-2026-75650, APSB26-146, VULN-39341, Magento zero-day 2026, Adobe Commerce zero-day,
-StyleSmuggler patch, Magento GraphQL vulnerability, Magento styles parameter RCE,
-gvfsd-user malware, fc-cache Magento backdoor, chronyd Magento malware, Magento kworker
-process malware, Magento Redis session hijack, Magento unauthenticated RCE September
-2026, Magento 2.4.9 exploit, Adobe Commerce backdoor removal, Magento pub/media web
+CVE-2026-75650, APSB26-146, APSB26-138, VULN-39341, Magento zero-day 2026, Adobe
+Commerce zero-day, StyleSmuggler patch, Mage-OS 3.5.0 security release, Magento
+GraphQL vulnerability, Magento styles parameter RCE, Magento directive signing
+vulnerability, gvfsd-user malware, fc-cache Magento backdoor, chronyd Magento malware,
+Magento kworker process malware, Magento Redis session hijack, Magento unauthenticated
+RCE September 2026, Magento 2.4.9 exploit, Adobe Commerce backdoor removal, Magento
+pub/media web
 shell, eComscan StyleSmuggler, Sansec Shield StyleSmuggler.
 
 ## Sourcing and provenance

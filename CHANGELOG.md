@@ -8,7 +8,46 @@ adoption play out.
 ## [Unreleased]
 - Watching for: further variants of the second, unrelated web-shell attacker; any
   additional implant version bumps beyond `fc-cache` 2.1.4 / `chronyd` 2.1.5; expanded
-  Adobe patch coverage for versions below the currently supported floor.
+  Adobe patch coverage for versions below the currently supported floor; whether the
+  community root-cause (directive-signing) framing and Adobe's own fix converge on the
+  same description over time.
+
+## 2026-09-09 — root cause detail, Mage-OS coverage, more community patch options
+Corroborating community coverage (patch write-ups, changelogs, and package registries
+dated 2026-09-05 through 2026-09-08) added detail not present in Sansec's advisory
+itself:
+
+- Added a more precise **root-cause explanation**: a community patch effort frames the
+  underlying flaw as Magento's directive-signing mechanism failing to restrict signing
+  to explicitly **deferred** directives (like `inlinecss`, which handles the
+  `style`/`styles` properties the vulnerability is named after) — letting an
+  improperly-resolved directive through validation it should have failed. Added to
+  `docs/VULNERABILITY.md` alongside the existing DI-scanner-sink framing; both describe
+  real, independently patchable points in the same chain, and Adobe's own hotfix
+  remains the authoritative fix.
+- **Mage-OS users have a dedicated path**: Mage-OS shipped version **3.5.0** as an
+  emergency security release porting the StyleSmuggler hotfix with added hardening,
+  bundling the equivalent of APSB26-138, and fixing four unrelated bugs. Documented in
+  `docs/PATCHING.md` and noted in the README.
+- Corrected and expanded the community-patch-options section in `docs/PATCHING.md`:
+  distinguished **wrappers around Adobe's official patch** from **independent interim
+  stopgap modules** (which predate and are superseded by the official hotfix), and
+  added specific named options and what each one actually does/doesn't cover:
+  Scandiweb's reported 41-patch backport set for Magento 2.2.0–2.4.3-p3; BigBridge's
+  root-cause "deferred directives" patch for 2.4.5–2.4.9; and Graycore's
+  `magento2-style-smuggler-patch`, whose own documentation is explicit that it is
+  hardening only, not a fix, and that a vulnerable store may already be compromised.
+- Added a **retrospective threat-hunting** recommendation to `docs/VULNERABILITY.md`
+  and `docs/INCIDENT_RESPONSE.md`: for anyone with EDR/auditd/process-lineage logging
+  predating disclosure, hunt across the full exploitation window (2026-09-04 onward)
+  for any PHP-FPM/web-server-worker process spawning an unexpected shell or binary as a
+  child — this catches variants not named anywhere else in this repo.
+- Reinforced the credential-rotation list in `docs/PATCHING.md` and
+  `docs/INCIDENT_RESPONSE.md` to explicitly name GraphQL integration tokens and OAuth
+  client secrets alongside the items already listed, matching Adobe's own post-hotfix
+  guidance as reported.
+- Fixed a stale line in `docs/INCIDENT_RESPONSE.md` that still said "there is still no
+  CVE" after the CVE had already been assigned in an earlier update.
 
 ## 2026-09-08 — APSB26-138 requirement, additional filename variants, deeper IR guidance
 Corroborating community write-ups (published 2026-09-07/08) added detail beyond

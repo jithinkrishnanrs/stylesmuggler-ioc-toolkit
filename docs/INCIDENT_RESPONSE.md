@@ -4,11 +4,13 @@ Use this if `scripts/stylesmuggler_scan.sh` (or the Python equivalent) reports a
 if you find any of the indicators in [`../iocs/`](../iocs/) by hand.
 
 **Note on patching:** Adobe's official hotfix (VULN-39341 / APSB26-146, CVE-2026-75650)
-now exists — see [`PATCHING.md`](PATCHING.md). Patching stops *new* exploitation; it
-does not undo an existing compromise. If you suspect you were already hit, work through
-this playbook's evidence-preservation steps before applying the hotfix on that specific
-host, so you don't destroy what you'd want to investigate. If you have no evidence of
-prior compromise, patch first, then still run the scanner to be sure.
+now exists, and must be applied **alongside** Adobe's separate regular September 2026
+update (APSB26-138) — see [`PATCHING.md`](PATCHING.md). Patching stops *new*
+exploitation; it does not undo an existing compromise. If you suspect you were already
+hit, work through this playbook's evidence-preservation steps before applying the
+hotfix on that specific host, so you don't destroy what you'd want to investigate. If
+you have no evidence of prior compromise, patch first, then still run the scanner to be
+sure.
 
 ## First: don't destroy evidence
 
@@ -229,8 +231,10 @@ attacker still has active execution just hands them the new ones too.
   re-encryption).
 - **Rotate every other credential the site user could read**, at minimum: database
   password, every admin account password (and invalidate existing admin sessions),
-  payment-provider API keys, other integration credentials in `env.php`, API/OAuth
-  tokens, and any SSH or deploy keys reachable by that user.
+  GraphQL integration tokens, OAuth client secrets, payment gateway API credentials,
+  other integration credentials in `env.php`, and any SSH or deploy keys reachable by
+  that user. This is Adobe's own stated list in its post-hotfix guidance — treat it as
+  a minimum, not a ceiling, for what to rotate.
 - **Check the `admin_user` table for a rogue account** and remove it; check for dropped
   PHP webshells under `pub/media/`, `pub/static/`, and theme directories — including the
   second, unrelated attacker's specific pattern
@@ -274,13 +278,20 @@ attacker still has active execution just hands them the new ones too.
 - Consider host-level process/behavior monitoring (auditd, an EDR agent) that would
   catch a `[kworker]`-named process owned by a non-root, non-kernel UID — this is exactly
   the kind of masquerade that filename-only checks miss.
+- **If you have EDR, auditd, or process-lineage logging that predates today**, run a
+  retrospective hunt across the full exploitation window (2026-09-04 onward): any
+  PHP-FPM or web server worker process spawning an unexpected shell, `curl`, or other
+  unrecognized binary as a child process. Magento's PHP processes have no legitimate
+  reason to do this — a hit here catches variants this playbook doesn't yet name.
 
 ## Step 6 — report and share
 
 - Submit anonymized IOCs (hashes, C2 addresses, request signatures — with your own
   organization's identifying details stripped) to your ISAC or sharing community.
 - Report the underlying vulnerability to [Sansec](https://sansec.io/contact) and to
-  **Adobe PSIRT**, not just to internal tooling — there is still no CVE, and vendor
-  awareness of new variants speeds up an eventual patch.
+  **Adobe PSIRT**, not just to internal tooling — this is now tracked as
+  **CVE-2026-75650** with an official patch (see [`PATCHING.md`](PATCHING.md)), but
+  vendor awareness of new variants (implant disguises, delivery vectors, or the second
+  attacker's tooling) still speeds up further guidance.
 - If you maintain a fork of this repo, add anything new you learned to `iocs/` with a
   note on how you observed it, dated.
