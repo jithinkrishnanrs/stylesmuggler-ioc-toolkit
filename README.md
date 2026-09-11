@@ -179,7 +179,8 @@ Full indicator list with sourcing: [`iocs/`](iocs/).
    mitigations in [`mitigations/`](mitigations/):
    - Block or rate-limit GraphQL's `styles[]` delivery path
      ([nginx](mitigations/nginx_block_graphql_styles.conf) /
-     [Apache](mitigations/apache_block_graphql_styles.conf))
+     [Apache](mitigations/apache_block_graphql_styles.conf) /
+     [Cloudflare WAF](mitigations/cloudflare_waf_rules.md) if you're behind Cloudflare)
    - Block PHP execution under `pub/media`/`pub/static`
      ([nginx](mitigations/nginx_block_php_execution_media.conf) /
      [Apache](mitigations/apache_block_php_execution_media.conf)) — targeted defense

@@ -4,7 +4,7 @@
     markers). Covers BOTH the Rust implant campaign (gvfsd-user/fc-cache/chronyd) AND
     the second, unrelated PHP web-shell attacker confirmed 2026-09-07 — these are two
     separate rule groups for two separate operators using the same entry point.
-    Sources: Sansec advisory (2026-09-05, updated through at least 2026-09-07) + Adobe
+    Sources: Sansec advisory (2026-09-05, updated through at least 2026-09-09) + Adobe
     APSB26-146 + community IR write-ups. See ../../docs/VULNERABILITY.md.
 
     Usage:
@@ -26,9 +26,9 @@ rule StyleSmuggler_Implant_Hash
 {
     meta:
         description = "Matches known StyleSmuggler implant hashes across all observed builds (gvfsd-user, fc-cache, chronyd)"
-        source = "Sansec advisory 2026-09-05, updated through 2026-09-07 + community IR"
+        source = "Sansec advisory 2026-09-05, updated through at least 2026-09-09 + community IR"
         reference = "https://sansec.io/research/stylesmuggler-0day"
-        date = "2026-09-07"
+        date = "2026-09-09"
 
     condition:
         // gvfsd-user build
@@ -38,7 +38,20 @@ rule StyleSmuggler_Implant_Hash
         // fc-cache / chronyd build
         hash.sha256(0, filesize) == "b79dfdc1eed860e0b76c629d6adfce251db379b0b45a6d728d4ef483f7551420" or
         hash.sha256(0, filesize) == "4352cabaa451e5a894535fbcc4d46628701303322a13745cb5479d7d0534ae8e" or
-        hash.sha256(0, filesize) == "d2fbf9eb75c495bfea48790d3b228fab0c15a282419c3d3f5e49294c4e1a3e82"
+        hash.sha256(0, filesize) == "d2fbf9eb75c495bfea48790d3b228fab0c15a282419c3d3f5e49294c4e1a3e82" or
+        hash.sha256(0, filesize) == "1a3374ffac5b0a62467612f264c49792d206304d4514409c982325c91231375d"
+}
+
+rule StyleSmuggler_SecondAttacker_Dropper_Hash
+{
+    meta:
+        description = "Matches the second, unrelated attacker's PHP web-shell dropper by hash. SEPARATE campaign from the Rust implant rules above."
+        source = "Sansec advisory, updated 2026-09-09"
+        reference = "https://sansec.io/research/stylesmuggler-0day"
+        date = "2026-09-09"
+
+    condition:
+        hash.sha256(0, filesize) == "d61217ca0bca83204302fa7b41935ce36f73764559c156d5c980f2fedddffb6e"
 }
 
 rule StyleSmuggler_Implant_Strings
@@ -95,17 +108,20 @@ rule StyleSmuggler_Poisoned_Log_Marker
 rule StyleSmuggler_SecondAttacker_WebShell
 {
     meta:
-        description = "Matches the second, unrelated attacker's PHP web shell/recon-probe artefacts (confirmed 2026-09-07) - filename pattern, campaign markers, and OOB exfil domain suffix. This is a SEPARATE campaign from the Rust implant rules above."
-        source = "Sansec advisory, updated 2026-09-07"
+        description = "Matches the second, unrelated attacker's PHP web shell/recon-probe artefacts (confirmed 2026-09-07, expanded 2026-09-09) - filename pattern, campaign markers, auth-gate header, and OOB exfil domain suffix. This is a SEPARATE campaign from the Rust implant rules above."
+        source = "Sansec advisory, updated through at least 2026-09-09"
         reference = "https://sansec.io/research/stylesmuggler-0day"
-        date = "2026-09-07"
+        date = "2026-09-09"
 
     strings:
-        $path        = "catalog/product/cache/ss_"
-        $marker_drop = /ss5_[0-9a-f]{10}/
-        $marker_recon = /ss6_[0-9a-f]{10}/
-        $exfil_tld   = ".oast.site"
-        $wpm_flag    = "w_pm"
+        $path          = "catalog/product/cache/ss_"
+        $marker_drop    = /ss5_[0-9a-f]{10}/
+        $marker_recon   = /ss6_[0-9a-f]{10}/
+        $marker_drop_exact  = "ss5_457cfa2fb7"
+        $marker_recon_exact = "ss6_457cfa2fb7_"
+        $exfil_tld     = ".oast.site"
+        $wpm_flag      = "w_pm"
+        $auth_header   = "X-Cache-Token: fced27f6d57702565353ecc11722533b"
 
     condition:
         any of them

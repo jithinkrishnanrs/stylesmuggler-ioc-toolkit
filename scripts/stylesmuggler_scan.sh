@@ -318,8 +318,14 @@ if [[ -n "$MAGENTO_ROOT" && -d "$MAGENTO_ROOT" ]]; then
     if grep -rlE 'ss[56]_[0-9a-f]{10}' "$t" 2>/dev/null | grep -q .; then
       hit "Second-attacker campaign marker (ss5_<hex>/ss6_<hex>) found in $t — this is a SEPARATE, unrelated attacker from the Rust implant; check pub/media for its web shell too"
     fi
+    if grep -rlF 'ss5_457cfa2fb7' "$t" 2>/dev/null | grep -q .; then
+      hit "Second-attacker EXACT campaign marker (ss5_457cfa2fb7 / ss6_457cfa2fb7_) found in $t — matches a specifically published campaign"
+    fi
     if grep -rlF 'oast.site' "$t" 2>/dev/null | grep -q .; then
       hit "Reference to oast.site (DNS-exfiltration canary domain) found in $t — matches the second attacker's recon-probe pattern"
+    fi
+    if grep -rlF 'X-Cache-Token: fced27f6d57702565353ecc11722533b' "$t" 2>/dev/null | grep -q .; then
+      hit "Second-attacker web-shell auth-header value found in $t — this indicates the dropped web shell was likely INVOKED, not just targeted"
     fi
   done
   if [[ $FINDINGS -eq 0 ]]; then
@@ -327,15 +333,16 @@ if [[ -n "$MAGENTO_ROOT" && -d "$MAGENTO_ROOT" ]]; then
   fi
 
   # Second, unrelated attacker's web shell: pub/media should NEVER contain executable
-  # PHP on a correctly configured Magento install.
+  # PHP on a correctly configured Magento install. Use a broad glob (*.ph*) to also
+  # catch .phtml/.phar variants, not just literal .php.
   if [[ -d "$MAGENTO_ROOT/pub/media" ]]; then
-    mapfile -t PHP_IN_MEDIA < <(find "$MAGENTO_ROOT/pub/media" -name '*.php' 2>/dev/null)
+    mapfile -t PHP_IN_MEDIA < <(find "$MAGENTO_ROOT/pub/media" -type f -name '*.ph*' 2>/dev/null)
     if [[ ${#PHP_IN_MEDIA[@]} -gt 0 ]]; then
       for f in "${PHP_IN_MEDIA[@]}"; do
-        hit "PHP file found under pub/media (should never contain executable PHP): $f — matches the second, unrelated attacker's web-shell technique"
+        hit "PHP-family file found under pub/media (should never contain executable PHP): $f — matches the second, unrelated attacker's web-shell technique"
       done
     else
-      ok "No PHP files found under pub/media."
+      ok "No PHP-family files found under pub/media."
     fi
   else
     info "pub/media not found under --magento-root — skipping web-shell path check"
@@ -353,12 +360,15 @@ fi
 section "Network"
 
 if command -v ss >/dev/null 2>&1; then
-  C2_IPS=("99.84.67.186" "209.141.43.95")
-  for ip in "${C2_IPS[@]}"; do
+  C2_IPS_TCP=("99.84.67.186" "209.141.43.95")
+  for ip in "${C2_IPS_TCP[@]}"; do
     if ss -tn 2>/dev/null | grep -q "$ip"; then
-      hit "Active connection to known C2/download address $ip"
+      hit "Active TCP connection to known C2/download address $ip"
     fi
   done
+  if ss -un 2>/dev/null | grep -q "185.157.160.251"; then
+    hit "Active UDP connection to known NTP-shaped C2 address 185.157.160.251 (fc-cache/chronyd build)"
+  fi
 
   # fc-cache/chronyd build beacons over UDP/123 disguised as NTP — check for resolved
   # connections to the known C2 domains if getent/dig is available, since ss won't show
@@ -374,14 +384,14 @@ if command -v ss >/dev/null 2>&1; then
   fi
   udp123_count=$(ss -un 2>/dev/null | grep -c ':123 ')
   if [[ "$udp123_count" -gt 0 ]]; then
-    info "Found $udp123_count active UDP/123 (NTP) socket(s) — verify these point at your real NTP servers, not the C2 domains in iocs/domains.txt. The fc-cache/chronyd build's beacon looks like NTP traffic to casual inspection."
+    info "Found $udp123_count active UDP/123 (NTP) socket(s) — verify these point at your real NTP servers, not the C2 domains/IP in iocs/domains.txt and iocs/ips.txt. The fc-cache/chronyd build's beacon looks like NTP traffic to casual inspection."
   fi
 
   REDIS_CONNS=$(ss -tn 2>/dev/null | grep -c '127\.0\.0\.1:6379')
   if [[ "$REDIS_CONNS" -gt 10 ]]; then
     hit "Unusually high number of local Redis connections ($REDIS_CONNS to 127.0.0.1:6379) — matches the session-harvesting pattern observed in a StyleSmuggler infection with NO outbound C2 traffic"
   else
-    info "Local Redis connection count: $REDIS_CONNS (not flagged; adjust threshold for your normal baseline)"
+    info "Local Redis connection count on default port 6379: $REDIS_CONNS (not flagged; adjust threshold for your normal baseline). NOTE: at least one confirmed investigation found Redis running on a NON-default port — read the actual host/port out of app/etc/env.php's cache and session blocks and check that port too if it differs from 6379."
   fi
 else
   info "'ss' not found — skipping live network check. Consider checking your firewall/proxy logs against iocs/ips.txt and iocs/domains.txt instead."

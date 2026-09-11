@@ -126,6 +126,14 @@ python-requests/2.32.4      # second wave
 # directly out of the store's own Redis instance. The fc-cache/chronyd build instead
 # beacons over UDP/123, disguised as NTP traffic, and separately makes plain-HTTP calls
 # to public IP-lookup services with a truncated User-Agent — see domains.txt for both.
+#
+# IMPORTANT: don't assume Redis is only ever on port 6379. At least one confirmed
+# investigation found the store's Redis instance running on a non-default port
+# (21113 in that case) — always read the actual host/port out of
+# app/etc/env.php's cache and session configuration blocks rather than
+# hardcoding 6379 in your own checks:
+grep -nA40 "'cache'" app/etc/env.php
+grep -nA30 "'session'" app/etc/env.php
 
 ## ================================================================================
 ## A SECOND, UNRELATED ATTACKER (confirmed 2026-09-07) — different operator, same
@@ -137,8 +145,22 @@ python-requests/2.32.4      # second wave
 ## Web shell path (the dropper, ~485 bytes, PHP) — pub/media should NEVER contain
 ## executable PHP on a correctly configured Magento store, so any hit here is significant
 pub/media/catalog/product/cache/ss_<10hex>/sync_<10hex>.php
-# Detection:
-find pub/media -name '*.php'
+# Detection — use a broad glob (*.ph*) to also catch .phtml/.phar variants, not just
+# literal .php:
+find pub/media -type f -name '*.ph*'
+
+## Web-shell authentication gate — the dropped shell only responds when a specific
+## request header is present; without it, requests return a generic 404, which is
+## exactly why filesystem discovery (the find command above) matters more than trying
+## to probe the shell over HTTP. Published header/value pair (2026-09-09 Sansec IOC
+## update):
+X-Cache-Token: fced27f6d57702565353ecc11722533b
+# This is presented here PURELY as a log-grep signature for identifying requests that
+# targeted a dropped web shell in your access logs — do not send this header to a
+# suspected shell path to "test" it; that interacts with live malware. Use the
+# filesystem/hash checks instead to confirm presence, and your access logs (grep for
+# this header value) to see whether it was ever successfully invoked.
+grep -c 'X-Cache-Token: fced27f6d57702565353ecc11722533b' access.log
 
 ## Recon probe (sent BEFORE the dropper, from the same operator) — a cover GraphQL
 ## query with the real payload smuggled in the Store: request header instead of the
@@ -162,8 +184,14 @@ Header: Store: <injected PHP payload>
 ## higher than the dropper's:
 ss5_<hex>    # dropper marker
 ss6_<hex>    # recon probe marker (same hex suffix as the matching dropper)
+# One confirmed campaign's exact marker pair, published by Sansec — match both the
+# shape above AND this literal pair, since attackers reuse infrastructure/tooling
+# across targets:
+ss5_457cfa2fb7    # dropper marker, exact observed value
+ss6_457cfa2fb7_   # recon probe marker, exact observed value (same hex suffix)
 # Treat grep hits for "ss5_" / "ss6_" followed by 10 hex characters in logs or
-# recovered payloads as belonging to this second attacker's campaign.
+# recovered payloads as belonging to this second attacker's campaign, even if the hex
+# suffix differs from the exact pair above — the shape is the durable signal.
 
 ## Secondary / post-exploitation indicators (not either implant/web-shell itself, but
 ## reported alongside them — check these before declaring a store clean)

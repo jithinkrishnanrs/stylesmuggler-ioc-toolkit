@@ -12,6 +12,50 @@ adoption play out.
   community root-cause (directive-signing) framing and Adobe's own fix converge on the
   same description over time.
 
+## 2026-09-09 (later) — Sansec IOC update: new hashes, new C2/attacker IPs, web-shell auth header
+Sansec's advisory was itself revised again (page modified timestamp 2026-09-09
+12:11 UTC), and a corroborating community write-up captured the added content in full
+— this update is sourced from the primary advisory's own additions, not just secondary
+commentary:
+
+- **New hashes**: a 7th SHA-256 for a `chronyd` variant, and — for the first time — a
+  published hash for the **second, unrelated attacker's PHP web-shell dropper**
+  (previously only identified by path pattern and campaign markers). Added to
+  `iocs/hashes.sha256` and a new dedicated YARA rule
+  (`StyleSmuggler_SecondAttacker_Dropper_Hash`).
+- **New network infrastructure**: a second, IP-based C2 endpoint
+  (`185.157.160.251:123`, UDP/NTP-shaped, alongside the existing `ntp.timesync.to`
+  domain family) and **four additional confirmed attacker source IPs**
+  (182.182.152.48, 76.31.99.207, 209.73.130.148, 77.239.124.107). Added to
+  `iocs/ips.txt` and `iocs/suricata/stylesmuggler.rules`; both scanners now check the
+  new C2 IP over UDP in addition to the existing TCP checks.
+- **The second attacker's web shell is authentication-gated**: it only responds to
+  requests carrying a specific header/value (`X-Cache-Token: <hash>`); without it,
+  requests return a generic 404. Published purely as a detection signature — a hit in
+  your access logs means the shell was likely *invoked*, not just targeted. Added to
+  `iocs/file_paths.txt`, both scanners' log-content checks, the YARA rule, and a new
+  Suricata rule flagging it as priority 1 (confirmed invocation, not just an attempt).
+- **Exact campaign-marker pair published**: `ss5_457cfa2fb7` (dropper) /
+  `ss6_457cfa2fb7_` (recon probe) — added as literal-match checks alongside the
+  existing shape-based regex in `iocs/`, both scanners, and the YARA/Suricata rules.
+- **Redis non-default-port lesson**: at least one confirmed investigation found Redis
+  running on a non-default port (21113, not 6379) — broadened guidance throughout
+  (`iocs/file_paths.txt`, `docs/INCIDENT_RESPONSE.md`, both scanners) to read the
+  actual host/port out of `app/etc/env.php`'s cache/session blocks rather than
+  hardcoding 6379.
+- Broadened the `pub/media` web-shell filesystem sweep in both scanners and
+  `iocs/file_paths.txt` from a literal `*.php` glob to `*.ph*`, catching `.phtml`/
+  `.phar` variants.
+- `docs/PATCHING.md`: added concrete patch-application commands (`patch -p1`/`-p2`,
+  Quality Patches Tool syntax, a Cloud `m2-hotfixes` workflow note, and a
+  `vendor/bin/magento-patches status` verification command), plus curl-based
+  edge/WAF-rule verification steps and an explicit caution against
+  `bin/magento module:disable Magento_GraphQl` as a substitute mitigation.
+- New `mitigations/cloudflare_waf_rules.md`: Cloudflare WAF custom-rule expressions
+  for GraphQL blocking, `styles`-argument-scoped blocking, and PHP-execution blocking
+  under `pub/media`/`pub/static`, for stores that front Magento with Cloudflare —
+  referenced from `mitigations/README.md` and the top-level README.
+
 ## 2026-09-09 — root cause detail, Mage-OS coverage, more community patch options
 Corroborating community coverage (patch write-ups, changelogs, and package registries
 dated 2026-09-05 through 2026-09-08) added detail not present in Sansec's advisory

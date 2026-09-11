@@ -15,6 +15,7 @@ the second, unrelated web-shell attacker described below.
 | [`apache_block_php_execution_media.conf`](apache_block_php_execution_media.conf) | Same, for Apache |
 | [`modsecurity_stylesmuggler.conf`](modsecurity_stylesmuggler.conf) | POST-body inspection for `styles[]`, trigger headers, response marker |
 | [`fail2ban_stylesmuggler.conf`](fail2ban_stylesmuggler.conf) | Reactive IP banning on exploit-shaped access-log lines |
+| [`cloudflare_waf_rules.md`](cloudflare_waf_rules.md) | Cloudflare WAF custom-rule expressions for stores behind Cloudflare — GraphQL blocking, PHP-execution blocking, and verification steps, no origin deploy required |
 
 ## Important scope limitations
 

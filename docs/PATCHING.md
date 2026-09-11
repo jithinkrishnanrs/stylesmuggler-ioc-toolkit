@@ -84,6 +84,38 @@ own release notes before assuming version-number parity with what's described he
    is set up. If you don't already have one of these tools wired into your Magento
    project, set that up first — it's also how you'll receive future hotfixes faster.
 
+### Typical application steps (standard, non-Cloud project)
+
+Adjust paths/tooling to your actual project layout — this is a common pattern, not a
+guarantee it matches yours exactly:
+
+```bash
+# 1. Download from repo.magento.com (requires authentication) and inspect first
+unzip -l VULN-39341-composer-patches.zip
+
+# 2a. If using Quality Patches Tool:
+vendor/bin/magento-patches apply VULN-39341
+
+# 2b. If using cweagans/composer-patches, extract the .patch file and apply directly:
+patch -p1 --dry-run < VULN-39341_Hotfix_COMPOSER.patch   # dry run first
+patch -p1 < VULN-39341_Hotfix_COMPOSER.patch              # then apply
+# (some patch files are rooted one level differently — try -p2 if -p1 rejects cleanly
+# applicable hunks; always dry-run before applying for real)
+
+# 3. Recompile/redeploy as your project normally requires after a code change
+bin/magento setup:di:compile
+bin/magento setup:static-content:deploy -f
+bin/magento cache:flush
+```
+
+### Adobe Commerce on Cloud infrastructure
+
+Cloud projects typically apply hotfixes through the `.magento/m2-hotfixes` (or
+equivalent) directory in your Cloud repository rather than a raw `patch` invocation —
+follow Adobe Commerce Cloud's documented hotfix workflow for your project template
+rather than the generic steps above, since Cloud deployments have their own build/
+deploy pipeline that a manually-applied patch can conflict with.
+
 ### Community delivery packages for the official patch
 
 Because Adobe ships VULN-39341 as raw patch files rooted at the Magento project (not as
@@ -151,12 +183,36 @@ grep -c 'StyleSmuggler mitigation' \
   setup/src/Magento/Setup/Module/Di/Code/Scanner/ArrayScanner.php
 ```
 
+If you applied the official hotfix through the Quality Patches Tool, ask it directly
+whether VULN-39341 is applied rather than inferring from file contents:
+
+```bash
+vendor/bin/magento-patches status | grep -i '39341\|Status'
+```
+
+If you're using a WAF/edge rule (see [`../mitigations/`](../mitigations/)) as your
+current mitigation while you finish rolling out the official patch, confirm it's
+actually live from outside your network:
+
+```bash
+curl -I https://your-store.example.com/graphql
+# Expect a 403 (or your configured block response) if you're blocking GraphQL
+
+curl -I https://your-store.example.com/
+# Expect a normal 200 — confirms the rule didn't also block your storefront
+```
+
 More generally: after applying the official hotfix, re-run the compromise scanner
 ([`../scripts/stylesmuggler_scan.sh`](../scripts/stylesmuggler_scan.sh) or `.py`) and
 confirm your patch management tooling (Quality Patches Tool / composer-patches) reports
 VULN-39341 as applied. Then exercise the vulnerable path in a controlled way on
 staging — trigger a test "failed payment" email and confirm it renders normally rather
 than executing anything unexpected — before considering the fix verified in production.
+
+**Avoid `bin/magento module:disable Magento_GraphQl --force` as a substitute for any
+of this.** It's more disruptive than an edge/origin block (it can break admin or build
+tooling that depends on the module being present) and doesn't get you anything a
+properly verified WAF rule or the official patch doesn't already achieve.
 
 ## Patching does not clean an existing compromise
 

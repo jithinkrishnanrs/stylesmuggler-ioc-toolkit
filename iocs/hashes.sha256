@@ -1,12 +1,12 @@
 # StyleSmuggler implant — SHA-256 hashes
 #
 # Format: <sha256>  <label>
-# Source: Sansec advisory (sample hashes, updated through 2026-09-07) + community IR on
-# two independently confirmed live infections. See docs/VULNERABILITY.md for why there
-# are multiple hashes per build: on one host, the binary running in memory differed from
-# the binary on disk, and the implant has iterated through three named disguises within
-# 72 hours of disclosure. ALWAYS also hash the running /proc/<pid>/exe, not only files
-# at rest — see scripts/stylesmuggler_scan.sh.
+# Source: Sansec advisory (sample hashes, updated through at least 2026-09-09) +
+# community IR on independently confirmed live infections. See docs/VULNERABILITY.md
+# for why there are multiple hashes per build: on one host, the binary running in
+# memory differed from the binary on disk, and the implant has iterated through three
+# named disguises within days of disclosure. ALWAYS also hash the running
+# /proc/<pid>/exe, not only files at rest — see scripts/stylesmuggler_scan.sh.
 #
 # Binary profile: ~1.9 MB, stripped, statically linked Rust, built for x86-64 and arm64.
 # Because the binary is new and hashes vary build-to-build (and disk-vs-memory), do NOT
@@ -23,6 +23,11 @@ e315687a1dfe61ef4a5a5642214db6d3b2b05d81391285eebc2af664641a26a7  gvfsd-user (Sa
 b79dfdc1eed860e0b76c629d6adfce251db379b0b45a6d728d4ef483f7551420  fc-cache / chronyd build, sample 1
 4352cabaa451e5a894535fbcc4d46628701303322a13745cb5479d7d0534ae8e  fc-cache / chronyd build, sample 2
 d2fbf9eb75c495bfea48790d3b228fab0c15a282419c3d3f5e49294c4e1a3e82  fc-cache / chronyd build, sample 3
+1a3374ffac5b0a62467612f264c49792d206304d4514409c982325c91231375d  chronyd variant (published in Sansec's 2026-09-09 IOC update)
+
+## Second, UNRELATED attacker's PHP web-shell dropper (not the Rust implant — a
+## completely separate campaign, see docs/VULNERABILITY.md)
+d61217ca0bca83204302fa7b41935ce36f73764559c156d5c980f2fedddffb6e  second-attacker PHP dropper (published in Sansec's 2026-09-09 IOC update)
 
 # NOTE: hash lists like this one lag the attacker by definition. At disclosure time, no
 # security vendor besides Sansec recognized any sample on VirusTotal. Treat every hash

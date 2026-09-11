@@ -43,8 +43,11 @@ IOC_DIR = SCRIPT_DIR.parent / "iocs"
 TRIGGER_HEADER_RE = re.compile(r"X[_-](TRACE[_-])?[0-9A-Fa-f]{10,12}")
 RESPONSE_MARKER_RE = re.compile(r"MG[0-9a-f]{16,}::")
 SECOND_ATTACKER_MARKER_RE = re.compile(r"ss[56]_[0-9a-f]{10}")
+SECOND_ATTACKER_EXACT_MARKER = "ss5_457cfa2fb7"
+WEBSHELL_AUTH_HEADER_VALUE = "X-Cache-Token: fced27f6d57702565353ecc11722533b"
 PHP_TAG_RE = re.compile(r"<\?php|<\?=")
-C2_IPS = ["99.84.67.186", "209.141.43.95"]
+C2_IPS_TCP = ["99.84.67.186", "209.141.43.95"]
+C2_IP_UDP = "185.157.160.251"
 NTP_C2_DOMAINS = ["ntp.timesync.to", "ntp.synctime.to", "ntp.syncstime.to"]
 CRON_PATTERN = re.compile(r"gvfsd|\.kw_|fc-cache|\.fc_|\.fc-|chronyd|\.chrony-|\.cache_|\.gvfsd-")
 SYSTEM_PATH_PREFIXES = ("/usr", "/sbin", "/bin", "/lib")
@@ -360,29 +363,42 @@ def check_poisoned_files(report: ScanReport, magento_root):
                     f"Second-attacker campaign marker (ss5_<hex>/ss6_<hex>) found in {f} — "
                     f"a SEPARATE, unrelated attacker from the Rust implant; check pub/media too",
                 )
+            if SECOND_ATTACKER_EXACT_MARKER in content:
+                report.hit(
+                    "logs",
+                    f"Second-attacker EXACT campaign marker ({SECOND_ATTACKER_EXACT_MARKER}) "
+                    f"found in {f} — matches a specifically published campaign",
+                )
             if "oast.site" in content:
                 report.hit(
                     "logs",
                     f"Reference to oast.site (DNS-exfiltration canary domain) found in {f} — "
                     f"matches the second attacker's recon-probe pattern",
                 )
+            if WEBSHELL_AUTH_HEADER_VALUE in content:
+                report.hit(
+                    "logs",
+                    f"Second-attacker web-shell auth-header value found in {f} — this "
+                    f"indicates the dropped web shell was likely INVOKED, not just targeted",
+                )
     if report.hit_count == before:
         report.ok("No injected PHP, trigger headers, execution markers, or second-attacker campaign markers found.")
 
     # Second, unrelated attacker's web shell: pub/media should NEVER contain executable
-    # PHP on a correctly configured Magento install.
+    # PHP on a correctly configured Magento install. Use a broad glob (*.ph*) to also
+    # catch .phtml/.phar variants, not just literal .php.
     media_dir = Path(magento_root) / "pub/media"
     if media_dir.is_dir():
-        php_hits = list(media_dir.rglob("*.php"))
+        php_hits = [p for p in media_dir.rglob("*.ph*") if p.is_file()]
         if php_hits:
             for f in php_hits:
                 report.hit(
                     "webshell",
-                    f"PHP file found under pub/media (should never contain executable PHP): {f} — "
+                    f"PHP-family file found under pub/media (should never contain executable PHP): {f} — "
                     f"matches the second, unrelated attacker's web-shell technique",
                 )
         else:
-            report.ok("No PHP files found under pub/media.")
+            report.ok("No PHP-family files found under pub/media.")
     else:
         report.info("webshell", "pub/media not found under --magento-root — skipping web-shell path check")
 
@@ -395,20 +411,22 @@ def check_network(report: ScanReport):
         report.info("network", "'ss' not available — skipping live network check")
         return
 
-    for ip in C2_IPS:
+    for ip in C2_IPS_TCP:
         if ip in out_tcp.stdout:
-            report.hit("network", f"Active connection to known C2/download address {ip}")
+            report.hit("network", f"Active TCP connection to known C2/download address {ip}")
 
     # fc-cache/chronyd build beacons over UDP/123 disguised as NTP traffic
     try:
         out_udp = subprocess.run(["ss", "-un"], capture_output=True, text=True, timeout=5)
+        if C2_IP_UDP in out_udp.stdout:
+            report.hit("network", f"Active UDP connection to known NTP-shaped C2 address {C2_IP_UDP} (fc-cache/chronyd build)")
         udp123_count = out_udp.stdout.count(":123 ")
         if udp123_count:
             report.info(
                 "network",
                 f"Found {udp123_count} active UDP/123 (NTP) socket(s) — verify these point "
-                f"at your real NTP servers, not {', '.join(NTP_C2_DOMAINS)}. The "
-                f"fc-cache/chronyd build's beacon looks like NTP traffic to casual inspection.",
+                f"at your real NTP servers, not {', '.join(NTP_C2_DOMAINS)} or {C2_IP_UDP}. "
+                f"The fc-cache/chronyd build's beacon looks like NTP traffic to casual inspection.",
             )
         for domain in NTP_C2_DOMAINS:
             try:
@@ -432,7 +450,14 @@ def check_network(report: ScanReport):
             f"matches session-harvesting pattern seen with NO outbound C2 traffic",
         )
     else:
-        report.info("network", f"Local Redis connection count: {redis_conns} (adjust threshold for your baseline)")
+        report.info(
+            "network",
+            f"Local Redis connection count on default port 6379: {redis_conns} (adjust "
+            f"threshold for your baseline). NOTE: at least one confirmed investigation "
+            f"found Redis running on a NON-default port — read the actual host/port out "
+            f"of app/etc/env.php's cache and session blocks and check that port too if "
+            f"it differs from 6379.",
+        )
 
     print(
         "\n[reminder] At least one confirmed infection made no outbound network traffic "
