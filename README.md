@@ -19,7 +19,7 @@ on **September 5, 2026**, with in-the-wild exploitation confirmed from
 > generates the attack payload. If you are looking for that, you are in the wrong repo —
 > go patch and hunt instead.
 
-## Status as of this writing (2026-09-07, evening)
+## Status as of this writing (2026-09-10)
 
 | | |
 |---|---|
@@ -27,13 +27,14 @@ on **September 5, 2026**, with in-the-wild exploitation confirmed from
 | Vendor | Adobe (Magento Open Source, Adobe Commerce) |
 | CVE | **CVE-2026-75650**, assigned 2026-09-07 |
 | Adobe bulletin | **APSB26-146**, published 2026-09-07 20:20 UTC, **Priority 1** (highest) |
-| Also required | **APSB26-138** — Adobe's regular September 2026 Commerce update, released 2026-09-08. Adobe states VULN-39341 must be applied **in addition to** this, not instead of it. |
+| Also required | **APSB26-138** (Adobe's regular September 2026 Commerce update, isolated patch `249-2026-09-001-CE`, released 2026-09-08). Adobe states VULN-39341 must be applied **in addition to** this, not instead of it. |
 | CVSS | **10.0** (3.1 and 4.0) — Critical |
 | CWE | CWE-1336, Improper Neutralization of Special Elements Used in a Template Engine |
+| **CISA KEV** | **Added to CISA's Known Exploited Vulnerabilities catalog 2026-09-08.** Federal civilian executive branch (FCEB) remediation deadline: **2026-09-11**. Not just a Magento-community problem — this is now a federally-tracked, actively-exploited RCE. |
 | Official patch | **Shipped.** Hotfix `VULN-39341`. **Coverage is not universal** — see the table below. |
 | Authentication required | **None** — unauthenticated |
 | Affected versions | Reproduced by Sansec on clean Magento Open Source 2.4.7, 2.4.8, 2.4.9; first confirmed victim ran 2.4.6-p15 fully patched (on prior patches) |
-| Exploitation | Active since 2026-09-04 22:20 UTC; continued through patch release; a second, unrelated attacker joined 2026-09-07 |
+| Exploitation | Active since 2026-09-04 22:20 UTC; continued through patch release; a second, unrelated attacker joined 2026-09-07. Third-party WAF telemetry (Imperva) reports observed targets skew retail (~39.5%), lifestyle (~19.5%), and healthcare (~17.9%) — a snapshot of one vendor's visibility, not a claim about the full population of vulnerable stores. |
 | Known Rust-implant variants | `[kworker/u:8:0]` (Sept 4) → `fc-cache` v2.1.4 (Sept 6) → `chronyd` v2.1.5 (Sept 7) — same operator, same agent ID, versions incrementing |
 | Second, unrelated attacker | PHP web shell in `pub/media/catalog/product/cache/`, preceded by a DNS-exfiltrating recon probe — independent of the Rust implant, confirmed 2026-09-07 |
 | Known delivery vectors | GraphQL `styles[]` parameter; invalid store code logged to `var/log/system.log`; file uploaded via Magento's customer custom options; the unrelated second attacker's `Store:`-header injection |
@@ -188,6 +189,9 @@ Full indicator list with sourcing: [`iocs/`](iocs/).
    - [ModSecurity rules](mitigations/modsecurity_stylesmuggler.conf) for POST-body
      inspection and [fail2ban](mitigations/fail2ban_stylesmuggler.conf) as a reactive
      backstop
+   - [`disable_functions` hardening](mitigations/php_disable_functions.md) (blocking
+     `proc_open` and related functions) as additional defense-in-depth against dropper
+     execution, independent of the delivery vector — test on staging first
    - See [`mitigations/README.md`](mitigations/README.md) for scope limitations —
      none of these close the customer-custom-options vector or the second attacker's
      `Store:`-header delivery.
@@ -216,12 +220,13 @@ mitigations/             nginx / Apache / ModSecurity / fail2ban rules
 
 ## Frequently searched terms
 
-CVE-2026-75650, APSB26-146, APSB26-138, VULN-39341, Magento zero-day 2026, Adobe
-Commerce zero-day, StyleSmuggler patch, Mage-OS 3.5.0 security release, Magento
-GraphQL vulnerability, Magento styles parameter RCE, Magento directive signing
-vulnerability, gvfsd-user malware, fc-cache Magento backdoor, chronyd Magento malware,
-Magento kworker process malware, Magento Redis session hijack, Magento unauthenticated
-RCE September 2026, Magento 2.4.9 exploit, Adobe Commerce backdoor removal, Magento
+CVE-2026-75650, APSB26-146, APSB26-138, VULN-39341, CISA KEV StyleSmuggler, Magento
+zero-day 2026, Adobe Commerce zero-day, StyleSmuggler patch, Mage-OS 3.5.0 security
+release, Magento GraphQL vulnerability, Magento styles parameter RCE, Magento directive
+signing vulnerability, gvfsd-user malware, fc-cache Magento backdoor, chronyd Magento
+malware, Magento kworker process malware, Magento Redis session hijack, Magento
+unauthenticated RCE September 2026, Magento 2.4.9 exploit, Adobe Commerce backdoor
+removal, Magento
 pub/media web
 shell, eComscan StyleSmuggler, Sansec Shield StyleSmuggler.
 

@@ -16,6 +16,7 @@ the second, unrelated web-shell attacker described below.
 | [`modsecurity_stylesmuggler.conf`](modsecurity_stylesmuggler.conf) | POST-body inspection for `styles[]`, trigger headers, response marker |
 | [`fail2ban_stylesmuggler.conf`](fail2ban_stylesmuggler.conf) | Reactive IP banning on exploit-shaped access-log lines |
 | [`cloudflare_waf_rules.md`](cloudflare_waf_rules.md) | Cloudflare WAF custom-rule expressions for stores behind Cloudflare — GraphQL blocking, PHP-execution blocking, and verification steps, no origin deploy required |
+| [`php_disable_functions.md`](php_disable_functions.md) | Disabling `proc_open` and related PHP functions — defense in depth against dropper execution, independent of the delivery vector |
 
 ## Important scope limitations
 
@@ -50,10 +51,15 @@ for further updates.
 2. If you can't patch immediately, or your version isn't covered, deploy a real WAF if
    you have one (commercial or Sansec Shield) — it will adapt to new variants faster
    than static config files in a repo like this one.
-3. Otherwise, apply the nginx/Apache GraphQL-blocking config for your web server, plus
-   the PHP-execution-blocking config (worth keeping even after patching, as general
-   hardening), plus ModSecurity if available for POST-body inspection.
-4. Add the fail2ban filter as a reactive backstop.
+3. Otherwise, apply the nginx/Apache GraphQL-blocking config for your web server (or
+   the [Cloudflare WAF rules](cloudflare_waf_rules.md) if you front the store with
+   Cloudflare), plus the PHP-execution-blocking config (worth keeping even after
+   patching, as general hardening), plus ModSecurity if available for POST-body
+   inspection.
+4. Add the fail2ban filter as a reactive backstop, and consider the
+   [`disable_functions` hardening](php_disable_functions.md) as an additional layer
+   independent of the delivery vector — test on staging first, since it can affect
+   legitimate functionality.
 5. **Run the compromise scanner before and after** applying mitigations or patching —
    none of this cleans an existing backdoor or web shell; see
    [`../docs/INCIDENT_RESPONSE.md`](../docs/INCIDENT_RESPONSE.md).

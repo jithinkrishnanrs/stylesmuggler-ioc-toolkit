@@ -232,9 +232,13 @@ attacker still has active execution just hands them the new ones too.
 - **Rotate every other credential the site user could read**, at minimum: database
   password, every admin account password (and invalidate existing admin sessions),
   GraphQL integration tokens, OAuth client secrets, payment gateway API credentials,
-  other integration credentials in `env.php`, and any SSH or deploy keys reachable by
-  that user. This is Adobe's own stated list in its post-hotfix guidance — treat it as
-  a minimum, not a ceiling, for what to rotate.
+  other integration credentials in `env.php`, any SSH or deploy keys reachable by that
+  user, and privileged service-account credentials. Don't stop at payment
+  integrations — shipping, tax, and other third-party API keys stored in the
+  application are called out specifically in some incident-response guidance, not just
+  the obvious payment-related ones. This is Adobe's own stated list in its post-hotfix
+  guidance, broadened per corroborating incident-response coverage — treat it as a
+  minimum, not a ceiling, for what to rotate.
 - **Check the `admin_user` table for a rogue account** and remove it; check for dropped
   PHP webshells under `pub/media/`, `pub/static/`, and theme directories — including the
   second, unrelated attacker's specific pattern

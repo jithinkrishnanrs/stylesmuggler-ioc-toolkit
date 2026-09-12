@@ -5,11 +5,17 @@ it yet, this is now your top priority — ahead of the interim mitigations in
 [`../mitigations/`](../mitigations/), which were only ever a stopgap for the period
 before a real fix existed.
 
+> **CVE-2026-75650 was added to CISA's Known Exploited Vulnerabilities (KEV) catalog on
+> 2026-09-08.** If you're a U.S. federal civilian executive branch (FCEB) agency or
+> contractor subject to CISA BOD 22-01, the mandated remediation deadline was
+> **2026-09-11**. Everyone else: treat a KEV listing as independent confirmation of
+> active, consequential exploitation — not just Sansec's and Adobe's own word for it.
+
 > **You also need Adobe's regular September 2026 update.** Adobe released its scheduled
-> monthly Commerce security update, **APSB26-138**, on **2026-09-08** — separately from
-> the StyleSmuggler hotfix. Adobe's own guidance is that **VULN-39341 must be applied in
-> addition to APSB26-138**, not instead of it. Applying only one of the two leaves you
-> exposed. Check both bulletins and apply both.
+> monthly Commerce security update, **APSB26-138** (isolated patch `249-2026-09-001-CE`),
+> on **2026-09-08** — separately from the StyleSmuggler hotfix. Adobe's own guidance is
+> that **VULN-39341 must be applied in addition to APSB26-138**, not instead of it.
+> Applying only one of the two leaves you exposed. Check both bulletins and apply both.
 
 ## Identifiers
 
@@ -17,7 +23,8 @@ before a real fix existed.
 |---|---|
 | CVE | CVE-2026-75650 |
 | Adobe bulletin (StyleSmuggler-specific) | [APSB26-146](https://helpx.adobe.com/security/products/magento/apsb26-146.html) |
-| Adobe's regular September 2026 update | **APSB26-138** (released 2026-09-08) — apply this **in addition to** VULN-39341, not instead of it |
+| Adobe's regular September 2026 update | **APSB26-138**, isolated patch `249-2026-09-001-CE` (released 2026-09-08) — apply this **in addition to** VULN-39341, not instead of it |
+| CISA KEV | Added 2026-09-08; FCEB remediation deadline 2026-09-11 |
 | Adobe priority | **Priority 1** (highest — Adobe's guidance is to patch immediately) |
 | CVSS 3.1 / 4.0 | **10.0** (Critical) |
 | CWE | CWE-1336, Improper Neutralization of Special Elements Used in a Template Engine |
@@ -64,12 +71,28 @@ fix**, even though you are just as exploitable as a supported install. Options:
 
 ### If you run Mage-OS
 
-Mage-OS shipped **version 3.5.0** as an emergency security release that ports the
-StyleSmuggler hotfix with additional hardening, bundles the equivalent of Adobe's
-September APSB26-138 update, and fixes four unrelated bugs. If you're on Mage-OS,
-upgrading to 3.5.0 (or later) is very likely your most direct path rather than trying
-to apply Adobe's Commerce-specific hotfix package by hand — verify against Mage-OS's
-own release notes before assuming version-number parity with what's described here.
+Mage-OS shipped **version 3.5.0** (released 2026-09-08) as an emergency security
+release that ports the StyleSmuggler hotfix with additional defense-in-depth
+hardening, bundles the equivalent of Adobe's September isolated patch
+(`249-2026-09-001-CE` / APSB26-138), and fixes four unrelated bugs. It still tracks
+Magento Open Source 2.4.9 upstream — there's no new Mage-OS major/minor version, just
+this security release. If you're on Mage-OS, upgrading to 3.5.0 (or later) is very
+likely your most direct path rather than trying to apply Adobe's Commerce-specific
+hotfix package by hand:
+
+```bash
+composer require mage-os/product-community-edition 3.5.0 --no-update
+composer update
+```
+
+**Upgrading is not sufficient on its own** — per Mage-OS's own release notes, stores
+were exploitable for three days before any patch existed, so still work through
+[`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md) for compromise assessment and
+credential rotation; Mage-OS explicitly considers both part of the remediation, not
+optional follow-up. Also note the hardening in 3.5.0 reportedly changes ACL and
+template/block policy — verify custom directives, template previews, and any
+third-party extensions that render templates dynamically still behave as expected
+after upgrading, on staging before production.
 
 ## Getting the official hotfix (Adobe Commerce / Magento Open Source)
 
@@ -122,12 +145,18 @@ Because Adobe ships VULN-39341 as raw patch files rooted at the Magento project 
 a normal per-package Composer patch), it doesn't apply cleanly through
 `cweagans/composer-patches` out of the box for every project layout. Community members
 have published Composer-installable wrapper packages that repackage Adobe's *official*
-patch content for easier application — evaluate any such package the same way you
-would any third-party dependency: check who publishes it, pin the version, and verify
-the resulting diff matches what Adobe's own KB describes before trusting it in
-production. This repo does not vouch for any specific third-party package; search for
-current options rather than relying on any name here going stale, since new packages
-have already appeared and changed within days of the original disclosure.
+patch content for easier application — for example, `disrex/stylesmuggler-adobe-patches`
+(a self-contained Composer plugin, not requiring `cweagans/composer-patches` or
+`enable-patching`, that auto-detects Magento Open Source vs. Mage-OS and applies the
+matching official patch — v3.0.0 as of 2026-09-08, per its Packagist listing).
+
+Evaluate any such package the same way you would any third-party dependency: check who
+publishes it, pin the version, and verify the resulting diff matches what Adobe's own
+KB describes before trusting it in production. This repo does not vouch for any
+specific third-party package beyond noting the example above and that it existed at
+publication time; search for current options rather than relying on any name here going
+stale, since new packages have already appeared and changed within days of the original
+disclosure.
 
 ## Interim application-layer guard modules (pre-official-patch stopgaps)
 
@@ -235,11 +264,14 @@ Once VULN-39341 (and APSB26-138) are applied and verified:
    — see [`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md).
 4. **Rotate every secret the site user could have read** — do this after containment,
    not before, since rotating while an attacker still has active execution just exposes
-   the new credentials too. Per Adobe's own post-hotfix guidance, this explicitly
-   includes: administrator passwords, GraphQL integration tokens, OAuth client secrets,
-   payment gateway API credentials, database credentials, SSH keys, and any other API
-   keys stored in the application. See Step 4 of
-   [`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md) for the full list and specific
-   commands (including the Magento `crypt/key` in `app/etc/env.php`).
+   the new credentials too. Per Adobe's own post-hotfix guidance and corroborating
+   incident-response coverage, this explicitly includes: administrator passwords,
+   GraphQL integration tokens, OAuth client secrets, payment gateway API credentials,
+   database credentials, SSH and deployment keys, privileged service-account
+   credentials, and any other third-party integration keys (shipping, tax, and similar
+   API keys are called out specifically in some reporting — don't assume "payment"
+   covers everything). See Step 4 of [`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md) for
+   the full list and specific commands (including the Magento `crypt/key` in
+   `app/etc/env.php`).
 5. Re-enable cron and take the store out of maintenance mode once you've verified the
    host is clean.

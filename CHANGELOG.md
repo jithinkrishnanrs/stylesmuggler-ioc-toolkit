@@ -10,7 +10,40 @@ adoption play out.
   additional implant version bumps beyond `fc-cache` 2.1.4 / `chronyd` 2.1.5; expanded
   Adobe patch coverage for versions below the currently supported floor; whether the
   community root-cause (directive-signing) framing and Adobe's own fix converge on the
-  same description over time.
+  same description over time. Sansec's advisory page modified timestamp is confirmed
+  through 2026-09-10 13:20 UTC as of this writing, but specific new content beyond the
+  2026-09-09 update has not yet been distinguished — re-check the primary source.
+
+## 2026-09-10 — CISA KEV listing, disable_functions hardening, corrected patch package info
+- **CVE-2026-75650 added to CISA's Known Exploited Vulnerabilities (KEV) catalog on
+  2026-09-08**, with a **2026-09-11** remediation deadline for U.S. federal civilian
+  executive branch agencies under Binding Operational Directive 22-01. Added
+  prominently to the README status table, `docs/PATCHING.md`, `docs/VULNERABILITY.md`,
+  and `docs/TIMELINE.md` — this is independent, third-party (government) confirmation
+  of active, consequential exploitation, not just Sansec's and Adobe's own word.
+- Adobe's September isolated patch identifier confirmed: **`249-2026-09-001-CE`**
+  (APSB26-138). Added alongside existing references.
+- **Corrected the Disrex package description** in `docs/PATCHING.md`: it's
+  `disrex/stylesmuggler-adobe-patches`, a self-contained Composer plugin (not
+  requiring `cweagans/composer-patches`) that auto-detects Magento Open Source vs.
+  Mage-OS and applies Adobe's official patch to either — not the separate
+  "adobe-patches"/"adobe-patches-mageos" split described in an earlier version of this
+  doc.
+- Expanded the Mage-OS section with the specific upgrade command, an explicit note
+  that upgrading alone doesn't replace compromise assessment (Mage-OS's own guidance),
+  and a compatibility caution about ACL/template-policy changes in 3.5.0's hardening.
+- New mitigation: [`mitigations/php_disable_functions.md`](mitigations/php_disable_functions.md)
+  — disabling `proc_open` and related PHP functions as defense-in-depth against
+  dropper execution, per public StyleSmuggler mitigation guidance. Includes a
+  pre-deployment codebase scan and staging-first guidance, since this can break
+  legitimate functionality if applied carelessly.
+- Broadened the credential-rotation lists in `docs/PATCHING.md` and
+  `docs/INCIDENT_RESPONSE.md` to explicitly name privileged service-account
+  credentials and non-payment third-party API keys (shipping, tax, etc.), per
+  corroborating incident-response coverage beyond Adobe's own baseline list.
+- Added Imperva WAF telemetry (sector breakdown of observed exploitation targets:
+  retail, lifestyle, healthcare) to `docs/VULNERABILITY.md` as context, explicitly
+  framed as one vendor's visibility rather than a complete picture.
 
 ## 2026-09-09 (later) — Sansec IOC update: new hashes, new C2/attacker IPs, web-shell auth header
 Sansec's advisory was itself revised again (page modified timestamp 2026-09-09
