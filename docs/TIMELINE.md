@@ -25,7 +25,8 @@ where the source didn't specify.
 | 2026-09-08 | **CVE-2026-75650 added to CISA's Known Exploited Vulnerabilities (KEV) catalog**, with a **2026-09-11** remediation deadline for U.S. federal civilian executive branch agencies under BOD 22-01. |
 | 2026-09-08 | Mage-OS ships **version 3.5.0** as an emergency security release porting the StyleSmuggler hotfix with additional hardening, bundling the APSB26-138 equivalent, and fixing four unrelated bugs. |
 | 2026-09-09, 12:11 UTC | Sansec's advisory revised again with expanded IOCs: an additional implant hash, a second (IP-based, UDP/123) C2 endpoint, four more confirmed attacker source IPs, and — for the second, unrelated attacker — a published web-shell dropper hash, an authentication-gating header value for the dropped shell, and the exact campaign-marker pair (`ss5_457cfa2fb7` / `ss6_457cfa2fb7_`). |
-| 2026-09-10, 13:20 UTC | Sansec's advisory page modified timestamp last confirmed as of this writing (this repo has not yet identified specific new content beyond the 2026-09-09 update at this revision — re-check the primary source directly). |
+| 2026-09-10, 13:20 UTC | Sansec's advisory page modified timestamp confirmed (no specific new content beyond the 2026-09-09 update was distinguished at that revision). |
+| 2026-09-11, 14:14 UTC | Sansec's advisory revised again: added process-lineage detail for the `chronyd` build (observed with no cron entry and a PID-1 parent, consistent with a self-initiated rename/relaunch rather than a cron-triggered restart) — see `VULNERABILITY.md` and `file_paths.txt`. Page modified timestamp last confirmed as of this writing. |
 
 ## How to keep this current
 

@@ -1,0 +1,62 @@
+/*
+  StyleSmuggler / CVE-2026-75650 — Velociraptor VQL retrospective hunt
+  Sources: Sansec advisory (updated through at least 2026-09-11) + corroborating
+  incident-response/detection-engineering write-ups. See ../../docs/VULNERABILITY.md.
+
+  For use with Velociraptor (https://docs.velociraptor.app/) against Magento/Adobe
+  Commerce hosts. Run this as a retrospective hunt across your fleet, not just the
+  host you already suspect — exploitation began roughly 24 hours before public
+  disclosure (2026-09-04 22:20 UTC), so "nothing found today" doesn't rule out
+  compromise earlier in that window if these files/processes have since been cleaned.
+
+  Adjust the webroot globs below to your actual Magento install path(s).
+*/
+
+-- 1) Recently modified PHP-family files in directories that should never contain
+--    dynamic/executable code on a correctly configured Magento install. Covers both
+--    the second, unrelated attacker's web-shell drop location (pub/media) and general
+--    webshell hygiene (pub/static, var, generated).
+SELECT FullPath, Size, Mtime, Ctime, Mode
+FROM glob(globs=[
+    '/var/www/**/pub/media/**/*.ph*',
+    '/var/www/**/pub/static/**/*.ph*',
+    '/var/www/**/var/**/*.ph*',
+    '/var/www/**/generated/**/*.ph*',
+    '/srv/**/pub/media/**/*.ph*',
+    '/srv/**/pub/static/**/*.ph*',
+    '/home/*/public_html/**/pub/media/**/*.ph*',
+    '/home/*/public_html/**/pub/static/**/*.ph*'
+])
+WHERE Mtime > (now() - 1209600)  -- last 14 days; widen if hunting back to 2026-09-04
+ORDER BY Mtime DESC
+
+-- 2) PHP-FPM / web-server worker processes with an unexpected shell, downloader, or
+--    encoder as a child process or in their own command line. Magento's PHP processes
+--    have no legitimate reason to spawn a shell, curl/wget, nc, or a base64 decode —
+--    this catches variants not named anywhere else in this repo, including future ones.
+SELECT Pid, Ppid, Name, CommandLine, Exe, Username, CreateTime
+FROM pslist()
+WHERE Name =~ '(?i)^(php|php-fpm|nginx|apache2?|httpd)'
+   OR CommandLine =~ '(?i)/bin/(sh|bash)|curl |wget |nc |ncat |base64 -d|base64 --decode'
+
+-- 3) Known StyleSmuggler process-masquerade names, regardless of ownership — review
+--    each hit's Username and Exe against ../file_paths.txt's "check ownership, not
+--    just name" guidance rather than treating every hit as malicious.
+SELECT Pid, Ppid, Name, CommandLine, Exe, Username, CreateTime
+FROM pslist()
+WHERE Name =~ '(?i)^(kworker|fc-cache|chronyd)$'
+
+-- 4) Cron spool entries matching known persistence patterns, across all local users
+SELECT OSPath, Data.content AS Content
+FROM glob(globs='/var/spool/cron/crontabs/*')
+WHERE Content =~ '(?i)gvfsd|\.kw_|fc-cache|\.fc_|\.fc-|chronyd|\.chrony-|\.cache_|\.gvfsd-'
+
+-- 5) Known implant/lock-file paths across all local users' home directories and /tmp
+SELECT FullPath, Size, Mtime
+FROM glob(globs=[
+    '/home/*/.local/share/.gvfsd/**',
+    '/home/*/.cache/fontconfig/fc-cache',
+    '/tmp/.kw_*', '/tmp/.gvfsd_*', '/tmp/.gvfsd-*', '/tmp/.cache_*',
+    '/tmp/.fc_*.lock', '/tmp/.fc-*/fc-cache', '/tmp/fc-cache',
+    '/tmp/.chrony-*/chronyd'
+])

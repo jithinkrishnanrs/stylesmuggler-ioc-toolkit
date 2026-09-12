@@ -19,7 +19,7 @@ on **September 5, 2026**, with in-the-wild exploitation confirmed from
 > generates the attack payload. If you are looking for that, you are in the wrong repo —
 > go patch and hunt instead.
 
-## Status as of this writing (2026-09-10)
+## Status as of this writing (2026-09-11)
 
 | | |
 |---|---|

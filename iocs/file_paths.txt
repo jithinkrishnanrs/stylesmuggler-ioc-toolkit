@@ -38,8 +38,16 @@
 # manual removal if the process/binary itself hasn't been cleaned first. Clean order:
 # persistence -> process -> binary -> re-check persistence after a full cron cycle.
 # IMPORTANT: the chronyd build has also been observed relaunching with NO cron entry at
-# all — an empty crontab is NOT proof of a clean host. Also check for other persistence
-# mechanisms (systemd user timers, shell startup files, PHP auto_prepend_file) below.
+# all — an empty crontab is NOT proof of a clean host. In the specific observed case,
+# the relaunched chronyd process's PARENT PID WAS 1 (i.e., it had been re-parented to
+# init/PID 1 after its original parent exited) and it reported an incremented version
+# in its beacon (2.1.5, up from 2.1.4 for the Sept 6 build) — consistent with the
+# process having relaunched/renamed ITSELF rather than being restarted by cron. Do not
+# rule out this implant on cron-absence alone; check `ps -eo pid,ppid,user,comm` for a
+# `chronyd` (or other masquerade name) entry with PPID 1 that ISN'T your system's
+# actual NTP daemon, alongside the hash/ownership checks elsewhere in this file.
+# Also check for other persistence mechanisms (systemd user timers, shell startup
+# files, PHP auto_prepend_file) below.
 
 ## Failed cron-write indicator — on hosts where the web/site user isn't permitted to
 ## write a crontab, the implant's repeated attempts can leave a distinctive log trail:

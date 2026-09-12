@@ -7,12 +7,41 @@ adoption play out.
 
 ## [Unreleased]
 - Watching for: further variants of the second, unrelated web-shell attacker; any
-  additional implant version bumps beyond `fc-cache` 2.1.4 / `chronyd` 2.1.5; expanded
-  Adobe patch coverage for versions below the currently supported floor; whether the
-  community root-cause (directive-signing) framing and Adobe's own fix converge on the
-  same description over time. Sansec's advisory page modified timestamp is confirmed
-  through 2026-09-10 13:20 UTC as of this writing, but specific new content beyond the
-  2026-09-09 update has not yet been distinguished — re-check the primary source.
+  additional implant version bumps beyond `chronyd` 2.1.5; expanded Adobe patch
+  coverage for versions below the currently supported floor; whether the community
+  root-cause (directive-signing) framing and Adobe's own fix converge on the same
+  description over time. Sansec's advisory page modified timestamp is confirmed
+  through 2026-09-11 14:14 UTC as of this writing.
+
+## 2026-09-11 — chronyd process-lineage detail, hunting artifacts, precise CVSS/version data
+- Sansec's advisory was revised again (page modified timestamp confirmed 2026-09-11
+  14:14 UTC). New technical detail directly from the primary source: the observed
+  `chronyd` process had **no corresponding cron entry** and a **parent process ID of
+  1**, consistent with the implant renaming/relaunching **itself** rather than being
+  restarted by cron. Added to `docs/VULNERABILITY.md` and `iocs/file_paths.txt` — an
+  absent cron entry is not sufficient evidence of a clean host for this build; check
+  process lineage (PPID) too.
+- Added the **full CVSS 3.1 vector** (`AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H`) to
+  `docs/VULNERABILITY.md`, and a note that no public exploit code/PoC is known to exist
+  as of this writing (flagged as a temporary condition, not a reason to deprioritize
+  patching).
+- Added a more precise version-coverage explanation to `docs/PATCHING.md`: Adobe's
+  affected-version ranges use monthly quality-patch-level naming (e.g.
+  `2.4.7-2026-aug`), so "2.4.7" as shorthand means "every patch level through August
+  2026" — clarified so readers on a newer patch level don't misread the range.
+- New `iocs/hunting/` directory with two ready-to-use, tool-agnostic-where-possible
+  retrospective hunting artifacts, sourced from corroborating detection-engineering
+  write-ups: a **Velociraptor VQL** query (filesystem, process, and cron sweep across
+  a fleet) and a **Sigma rule** detecting a web server/PHP-FPM process spawning a
+  shell, downloader, or encoder — a durable behavioral signal independent of any
+  specific named indicator in this repo, meant to catch variants not documented
+  anywhere else here. Referenced from `docs/VULNERABILITY.md`'s retrospective-hunting
+  section and `iocs/README.md`.
+- No scanner code changes this round (the PID-1/no-cron chronyd detail is documented
+  as an investigative technique rather than encoded as an automated check, since a
+  PID-1 parent alone doesn't reliably distinguish the implant from legitimate
+  re-parented daemons — combine it with the existing ownership/hash checks).
+
 
 ## 2026-09-10 — CISA KEV listing, disable_functions hardening, corrected patch package info
 - **CVE-2026-75650 added to CISA's Known Exploited Vulnerabilities (KEV) catalog on

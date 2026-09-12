@@ -43,6 +43,16 @@ before a real fix existed.
 | Adobe Commerce B2B | 1.3.3 – 1.5.3 | below 1.3.3 |
 | Magento Open Source | **2.4.6 – 2.4.9 only** | 2.4.5 and below |
 
+**More precisely**, per corroborating coverage of Adobe's own affected-versions
+listing, each minor version line is covered up to and including its **August 2026
+monthly quality patch level** (Adobe's naming convention, e.g. `2.4.7-2026-aug`) —
+"2.4.7" alone is shorthand for "every patch level of 2.4.7 up through the August 2026
+release." If you're running a patch level *newer* than August 2026 on an otherwise
+covered line, you should already have this fix or its equivalent baked in — verify
+directly rather than assuming from the shorthand ranges above. If you're on an EOL
+line not listed in Adobe's affected-versions table at all, don't assume you're safe by
+omission — you're simply not something Adobe is tracking a fix for; see below.
+
 If your store runs Magento Open Source 2.4.5 or older, **Adobe is not shipping you a
 fix**, even though you are just as exploitable as a supported install. Options:
 

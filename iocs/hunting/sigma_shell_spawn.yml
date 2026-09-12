@@ -1,0 +1,58 @@
+title: Web Server or PHP Process Spawning Shell on Magento/Adobe Commerce Host
+id: 6f1d3a8e-9c4b-4e7a-b2f1-7a3c9e5d1f6b
+status: experimental
+description: |
+    Detects a web server or PHP-FPM worker process spawning an interactive shell,
+    network downloader, or encoder as a child process. Written for retrospective and
+    ongoing hunting around StyleSmuggler (CVE-2026-75650), the unauthenticated Magento
+    / Adobe Commerce RCE (Sansec advisory, disclosed 2026-09-05), but the underlying
+    behavior — a PHP application process spawning a shell — is a generic and durable
+    signal that isn't tied to any single CVE's specific IOCs, which is the point: it
+    should also catch variants of this and future attacks against the same class of
+    application process that this repo doesn't yet name.
+references:
+    - https://sansec.io/research/stylesmuggler-0day
+    - https://helpx.adobe.com/security/products/magento/apsb26-146.html
+author: Compiled for the StyleSmuggler IOC Toolkit from published community detection guidance
+date: 2026/09/11
+tags:
+    - attack.execution
+    - attack.t1059
+    - cve.2026.75650
+logsource:
+    category: process_creation
+    product: linux
+detection:
+    parent_selection:
+        ParentImage|contains:
+            - '/php'
+            - '/php-fpm'
+            - '/nginx'
+            - '/apache2'
+            - '/httpd'
+    child_selection:
+        Image|endswith:
+            - '/sh'
+            - '/bash'
+            - '/dash'
+            - '/curl'
+            - '/wget'
+            - '/nc'
+            - '/ncat'
+            - '/socat'
+            - '/python'
+            - '/python3'
+            - '/perl'
+    encoded_selection:
+        CommandLine|contains:
+            - 'base64 -d'
+            - 'base64 --decode'
+    condition: parent_selection and (child_selection or encoded_selection)
+falsepositives:
+    - Legitimate deployment/build tooling that shells out from a PHP-FPM-adjacent
+      process (rare in a correctly separated build/deploy pipeline, but check your
+      own CI/CD and cron-triggered maintenance scripts before treating every hit as
+      malicious)
+    - Health-check or monitoring agents that happen to share a process-name prefix
+      with the web server
+level: high
