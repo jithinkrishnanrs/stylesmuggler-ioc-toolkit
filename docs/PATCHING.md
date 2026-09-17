@@ -53,6 +53,15 @@ directly rather than assuming from the shorthand ranges above. If you're on an E
 line not listed in Adobe's affected-versions table at all, don't assume you're safe by
 omission — you're simply not something Adobe is tracking a fix for; see below.
 
+**Don't confuse this with APSB26-138's own patch-level naming.** APSB26-138 — the
+separate, regular September update you also need (see above) — ships as
+`<version>-2026-sep` releases (e.g. `2.4.9-2026-sep`, `2.4.8-2026-sep`). The
+`-2026-aug` reference above describes the version floor StyleSmuggler's hotfix
+(VULN-39341/APSB26-146) assumes you're already at; the `-2026-sep` releases are
+Adobe's next regular monthly patch on top of that, addressing APSB26-138's own,
+unrelated fixes. You need both, but they're two different monthly patch levels, not
+the same one described two ways.
+
 **This table itself has already changed once.** Corroborating coverage reports that
 Adobe's Experience League knowledge-base article for this hotfix was updated on
 September 11, 2026 to *expand* hotfix compatibility beyond what was originally listed.
@@ -84,8 +93,12 @@ fix**, even though you are just as exploitable as a supported install. Options:
      paths through the vulnerability remain open.
    This repo does **not** redistribute or endorse any specific third-party patch —
    evaluate the source, test thoroughly on staging, and understand you're trusting an
-   unofficial reconstruction of a fix for a CVSS 10.0 RCE. Search for current options
-   rather than relying on any name or link here going stale.
+   unofficial reconstruction of a fix for a CVSS 10.0 RCE. Notably, at least one
+   independent write-up covering these EOL backports states explicitly that **Sansec
+   itself has not reviewed them** — third-party endorsement of the underlying
+   vulnerability's severity does not extend to endorsement of any specific unofficial
+   fix for it. Search for current options rather than relying on any name or link here
+   going stale.
 
 ### If you run Mage-OS
 
@@ -124,6 +137,13 @@ after upgrading, on staging before production.
    mechanism for hotfixes) or `cweagans/composer-patches`, depending on how your project
    is set up. If you don't already have one of these tools wired into your Magento
    project, set that up first — it's also how you'll receive future hotfixes faster.
+
+**If you're on Adobe Commerce or B2B 2.4.4 or 2.4.5 specifically**, corroborating
+coverage reports that the composer-patch format isn't supported on those older
+versions, and Adobe instead provides a **standalone ZIP patch** for them. Check
+Adobe's KB article for your exact version before assuming the composer-patch workflow
+below applies — it may not, and the application steps for a standalone ZIP patch
+differ from the composer-patch steps.
 
 ### Typical application steps (standard, non-Cloud project)
 
@@ -166,7 +186,13 @@ have published Composer-installable wrapper packages that repackage Adobe's *off
 patch content for easier application — for example, `disrex/stylesmuggler-adobe-patches`
 (a self-contained Composer plugin, not requiring `cweagans/composer-patches` or
 `enable-patching`, that auto-detects Magento Open Source vs. Mage-OS and applies the
-matching official patch — v3.0.0 as of 2026-09-08, per its Packagist listing).
+matching official patch — v3.0.0 as of 2026-09-08, per its Packagist listing). Note
+that an earlier, Mage-OS-specific package from the same group
+(`disrex/stylesmuggler-adobe-patches-mageos`) has since been marked **abandoned** by
+its own author, who now directs users to the unified package above instead — a useful
+reminder that even well-maintained community tooling in this space is still shifting
+week to week; check a package's current status before trusting instructions (including
+this repo's) that name a specific one.
 
 Evaluate any such package the same way you would any third-party dependency: check who
 publishes it, pin the version, and verify the resulting diff matches what Adobe's own

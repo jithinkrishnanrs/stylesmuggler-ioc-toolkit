@@ -12,7 +12,34 @@ adoption play out.
   patch coverage for versions below the currently supported floor; independent
   confirmation (beyond a single vendor's own fleet telemetry) of the GIF+PHP polyglot
   mechanism proposed for the customer-custom-options vector. Sansec's advisory page
-  modified timestamp is confirmed through 2026-09-16 06:42 UTC as of this writing.
+  modified timestamp is confirmed unchanged at 2026-09-16 06:42 UTC as of this writing
+  (no update to the primary source since the last check).
+
+## 2026-09-17 — standalone ZIP patches for 2.4.4/2.4.5, patch-level naming clarified
+Sansec's own advisory page has not changed since the last check (identical modified
+timestamp). Broader corroborating coverage, cross-checked across two independent
+write-ups, added concrete patching-process detail worth including:
+
+- **Adobe Commerce/B2B versions 2.4.4 and 2.4.5 require a standalone ZIP patch**,
+  not the composer-patch workflow described elsewhere in `docs/PATCHING.md` — those
+  older versions don't support the composer patch format. Added as an explicit
+  callout before the composer-specific steps, so readers on those versions don't
+  follow instructions that don't apply to them.
+- **Clarified the two different monthly patch-level namings in play**: the
+  `-2026-aug` reference describes the version floor StyleSmuggler's own hotfix
+  (VULN-39341/APSB26-146) assumes; the separately-required APSB26-138 ships as
+  `-2026-sep` releases. These are two different monthly patch levels, not the same
+  thing described two ways — a distinction the original phrasing risked blurring.
+- **Explicit caveat added**: at least one independent write-up covering the
+  third-party EOL backports (Scandiweb's 41-version bundle) states plainly that
+  **Sansec has not reviewed them** — strengthened the existing "evaluate
+  independently" language with this concrete detail.
+- Noted that the Mage-OS-specific Disrex package
+  (`disrex/stylesmuggler-adobe-patches-mageos`) has since been marked **abandoned**
+  by its own author in favor of the unified `disrex/stylesmuggler-adobe-patches`
+  package — a reminder that community tooling in this space is still shifting.
+- No scanner or IOC changes this round — all additions are patching-process
+  guidance, not new host-level or log-level indicators.
 
 ## 2026-09-16 — plausible mechanism for the custom-options vector, scale telemetry, KEV metadata
 Sansec's own advisory page was revised again (modified timestamp confirmed
