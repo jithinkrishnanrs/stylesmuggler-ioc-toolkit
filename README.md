@@ -19,7 +19,7 @@ on **September 5, 2026**, with in-the-wild exploitation confirmed from
 > generates the attack payload. If you are looking for that, you are in the wrong repo —
 > go patch and hunt instead.
 
-## Status as of this writing (2026-09-11)
+## Status as of this writing (2026-09-14)
 
 | | |
 |---|---|
@@ -28,17 +28,20 @@ on **September 5, 2026**, with in-the-wild exploitation confirmed from
 | CVE | **CVE-2026-75650**, assigned 2026-09-07 |
 | Adobe bulletin | **APSB26-146**, published 2026-09-07 20:20 UTC, **Priority 1** (highest) |
 | Also required | **APSB26-138** (Adobe's regular September 2026 Commerce update, isolated patch `249-2026-09-001-CE`, released 2026-09-08). Adobe states VULN-39341 must be applied **in addition to** this, not instead of it. |
-| CVSS | **10.0** (3.1 and 4.0) — Critical |
+| CVSS | **10.0** (3.1 and 4.0) — Critical. Full 3.1 vector: `AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H` |
 | CWE | CWE-1336, Improper Neutralization of Special Elements Used in a Template Engine |
 | **CISA KEV** | **Added to CISA's Known Exploited Vulnerabilities catalog 2026-09-08.** Federal civilian executive branch (FCEB) remediation deadline: **2026-09-11**. Not just a Magento-community problem — this is now a federally-tracked, actively-exploited RCE. |
 | Official patch | **Shipped.** Hotfix `VULN-39341`. **Coverage is not universal** — see the table below. |
 | Authentication required | **None** — unauthenticated |
+| Public exploit code | None known/published as of this writing — all observed exploitation is custom attacker tooling. Treat as temporary, not a reason to deprioritize patching. |
 | Affected versions | Reproduced by Sansec on clean Magento Open Source 2.4.7, 2.4.8, 2.4.9; first confirmed victim ran 2.4.6-p15 fully patched (on prior patches) |
-| Exploitation | Active since 2026-09-04 22:20 UTC; continued through patch release; a second, unrelated attacker joined 2026-09-07. Third-party WAF telemetry (Imperva) reports observed targets skew retail (~39.5%), lifestyle (~19.5%), and healthcare (~17.9%) — a snapshot of one vendor's visibility, not a claim about the full population of vulnerable stores. |
-| Known Rust-implant variants | `[kworker/u:8:0]` (Sept 4) → `fc-cache` v2.1.4 (Sept 6) → `chronyd` v2.1.5 (Sept 7) — same operator, same agent ID, versions incrementing |
+| Exploitation | Active since 2026-09-04 22:20 UTC; continued through patch release; at least **three independent toolkits** confirmed exploiting the same entry point as of 2026-09-14. Third-party WAF telemetry (Imperva) reports observed targets skew retail (~39.5%), lifestyle (~19.5%), and healthcare (~17.9%) — a snapshot of one vendor's visibility, not a claim about the full population of vulnerable stores. |
+| Known Rust-implant variants | `[kworker/u:8:0]` (Sept 4) → `fc-cache` v2.1.4 (Sept 6) → `chronyd` v2.1.5 (Sept 7) — same operator, same agent ID, versions incrementing. The `chronyd` build has been observed self-relaunching with no cron entry and a PID-1 parent. |
 | Second, unrelated attacker | PHP web shell in `pub/media/catalog/product/cache/`, preceded by a DNS-exfiltrating recon probe — independent of the Rust implant, confirmed 2026-09-07 |
-| Known delivery vectors | GraphQL `styles[]` parameter; invalid store code logged to `var/log/system.log`; file uploaded via Magento's customer custom options; the unrelated second attacker's `Store:`-header injection |
-| Impact | Remote code execution → persistent Rust-based backdoor, independent PHP web shell, Redis session harvesting, credential/secret exposure via `app/etc/env.php` |
+| **Third, distinct toolkit** | **Confirmed 2026-09-14.** A remote-file-include backdoor edited directly into the core framework file `vendor/magento/framework/App/View.php`, gated by a cookie (`gl_google_advisor_824808`) disguised as ad-tech tracking. Fetches and executes a remote payload on demand, then deletes the transient file — nothing sits on disk between requests except the one tampered line in a vendor file. |
+| **Detonation without the email** | **Confirmed 2026-09-14.** A second chain reaches full code execution via `POST /paypal/transparent/response/` (PHP source in the query string) without ever rendering the "failed payment" email — markers `MGPROOF::`/`MGKWSIM::`, direct command execution through a `kwc` parameter. Mitigations built around the email trigger alone do not cover this. |
+| Known delivery vectors | GraphQL `styles[]` parameter; invalid store code logged to `var/log/system.log`; file uploaded via Magento's customer custom options; the unrelated second attacker's `Store:`-header injection; PHP source in the `/paypal/transparent/response/` query string (email-independent) |
+| Impact | Remote code execution → persistent Rust-based backdoor, independent PHP web shell, a stealthy framework-level RFI backdoor, Redis session harvesting, credential/secret exposure via `app/etc/env.php` |
 
 ### Adobe's official patch coverage — check this before assuming you're safe
 
@@ -61,9 +64,11 @@ you update anything here.
 
 ## What StyleSmuggler actually is
 
-Magento's own GraphQL `styles` parameter and its dependency-injection based file scanning
-are abused as a two-stage, file-based deferred-execution primitive rather than a single
-obvious injection point:
+Magento's own GraphQL `styles` parameter and its dependency-injection based file
+scanning are abused as a file-based deferred-execution primitive. The originally
+documented chain has two stages, but — as of Sansec's September 14 update — it is not
+the *only* confirmed chain, and detonation does not always require what stage two
+originally described:
 
 1. **Poison.** Attacker-controlled data reaches a Magento-generated log or report file
    (`var/log/system.log` via an invalid store code that Magento logs verbatim, or
@@ -81,7 +86,16 @@ Reminder" email in your inbox with raw, unrendered `{{var ...}}` tags and a cust
 address ending in `.invalid`. This is often the *first* visible sign, before anyone
 checks a log.
 
-Sansec's updates confirmed a **second, independent exploitation path** for the same
+**But that email is not the only way to reach execution.** Sansec confirmed a second,
+independent detonation chain that skips the email entirely: `POST
+/paypal/transparent/response/` with PHP source planted in the query string, leading to
+observed payloads that print `MGPROOF::` (a proof-of-execution check, alongside a file
+named `mgproof717.txt`) or `MGKWSIM::` — the latter a direct command-execution
+primitive that runs whatever arrives, base64-encoded, in a `kwc` request parameter, no
+email involved anywhere. Any mitigation built solely around watching or disabling the
+failed-payment email does not cover this path.
+
+Sansec's updates also confirmed a **second, independent exploitation path** for the same
 Rust-implant campaign: even stores that moved session storage off Redis and onto the
 database were still compromised — the same operator's second attempt succeeded seconds
 later using a file uploaded through Magento's **customer custom options** feature
@@ -97,13 +111,27 @@ Sansec — not a sustained campaign — but it means a single vulnerable host ca
 **two unrelated intrusions through one flaw**. Cleaning up the Rust implant does not
 mean your store is clean.
 
+**And on September 14, Sansec confirmed a third, distinct toolkit** — different again
+from both of the above. Rather than dropping a new file, it edits a **core Magento
+vendor file** (`vendor/magento/framework/App/View.php`) directly, adding an on-demand
+remote-file-include backdoor gated by a cookie (`gl_google_advisor_824808`)
+deliberately disguised as ad-tech tracking. When the cookie is present, the backdoor
+base64-decodes its value as a URL, fetches it, writes the response to `/tmp/tmp.log`,
+executes it, and deletes it immediately — leaving nothing extra on disk between
+requests except the one tampered line in a vendor file. A `pub/media` sweep will never
+catch this one; you have to check vendor-file integrity directly.
+
 The Rust implant itself has also evolved: the original `[kworker/u:8:0]`-masquerading
 build (Sept 4) was followed by an `fc-cache`-masquerading build v2.1.4 (Sept 6) that
 beacons out disguised as NTP traffic, and then a `chronyd`-masquerading redeploy v2.1.5
 (Sept 7) of the **same implant, same agent ID** — evidence the attacker is actively
-iterating to evade whatever detection you publish. Sansec states it hasn't yet seen
+iterating to evade whatever detection you publish. The `chronyd` build has also been
+observed self-relaunching with **no cron entry and a parent process ID of 1**,
+consistent with the rename being self-initiated rather than cron-triggered — an empty
+crontab is not proof of a clean host for this build. Sansec states it hasn't yet seen
 evidence this implant was weaponized beyond persistence/recon — don't read that as
-reassurance given the unrelated attacker's working web shell on the same access path.
+reassurance given the unrelated attacker's working web shell, and now a third toolkit's
+working backdoor, on the same access path.
 
 See [`docs/FAQ.md`](docs/FAQ.md) for quick answers,
 [`docs/VULNERABILITY.md`](docs/VULNERABILITY.md) for the full technical writeup and
@@ -152,14 +180,19 @@ destroys forensic evidence (see [`docs/INCIDENT_RESPONSE.md`](docs/INCIDENT_RESP
 - **SHA-256** of on-disk binaries *and* of the live `/proc/<pid>/exe` image (the two can
   differ — the implant has been observed updating itself in memory)
 - **Poisoned log/report files** (`var/log/system.log`, `var/report/`) for injected PHP,
-  the two known trigger-header shapes (`X-TRACE-<10hex>` and `X-<12hex>`), and the
+  the two known trigger-header shapes (`X-TRACE-<10hex>` and `X-<12hex>`), the
   **second, unrelated attacker's** campaign markers (`ss5_`/`ss6_<hex>`) and DNS-canary
-  domain (`oast.site`)
+  domain (`oast.site`), and the **execution-without-email chain's** fixed-string
+  markers (`MGPROOF::`, `MGKWSIM::`) and proof artefact (`mgproof717.txt`)
 - **Proof-of-execution response markers** (`MG<20hex>::...::/MG<20hex>`) left behind in
   logs when the payload actually ran
 - **PHP files under `pub/media`** — which should never contain executable PHP on a
   correctly configured Magento store — matching the second attacker's web-shell drop
   pattern
+- **Tampering in the core framework file** `vendor/magento/framework/App/View.php` —
+  the third toolkit's gating cookie (`gl_google_advisor_824808`) and its transient
+  `/tmp/tmp.log` artefact, neither of which live under `pub/media` and so wouldn't be
+  caught by the check above
 - Established connections to the **published C2/download hosts** — including the
   `fc-cache`/`chronyd` build's NTP-*shaped* beaconing to `ntp.timesync.to:123/UDP` (and
   fallbacks), and its plain-HTTP calls to public IP-lookup services
@@ -226,9 +259,9 @@ release, Magento GraphQL vulnerability, Magento styles parameter RCE, Magento di
 signing vulnerability, gvfsd-user malware, fc-cache Magento backdoor, chronyd Magento
 malware, Magento kworker process malware, Magento Redis session hijack, Magento
 unauthenticated RCE September 2026, Magento 2.4.9 exploit, Adobe Commerce backdoor
-removal, Magento
-pub/media web
-shell, eComscan StyleSmuggler, Sansec Shield StyleSmuggler.
+removal, Magento pub/media web shell, Magento framework RFI backdoor, vendor/magento
+framework tampering, gl_google_advisor_824808, MGKWSIM MGPROOF Magento, Magento
+paypal transparent response exploit, eComscan StyleSmuggler, Sansec Shield StyleSmuggler.
 
 ## Sourcing and provenance
 

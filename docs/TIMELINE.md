@@ -26,7 +26,8 @@ where the source didn't specify.
 | 2026-09-08 | Mage-OS ships **version 3.5.0** as an emergency security release porting the StyleSmuggler hotfix with additional hardening, bundling the APSB26-138 equivalent, and fixing four unrelated bugs. |
 | 2026-09-09, 12:11 UTC | Sansec's advisory revised again with expanded IOCs: an additional implant hash, a second (IP-based, UDP/123) C2 endpoint, four more confirmed attacker source IPs, and — for the second, unrelated attacker — a published web-shell dropper hash, an authentication-gating header value for the dropped shell, and the exact campaign-marker pair (`ss5_457cfa2fb7` / `ss6_457cfa2fb7_`). |
 | 2026-09-10, 13:20 UTC | Sansec's advisory page modified timestamp confirmed (no specific new content beyond the 2026-09-09 update was distinguished at that revision). |
-| 2026-09-11, 14:14 UTC | Sansec's advisory revised again: added process-lineage detail for the `chronyd` build (observed with no cron entry and a PID-1 parent, consistent with a self-initiated rename/relaunch rather than a cron-triggered restart) — see `VULNERABILITY.md` and `file_paths.txt`. Page modified timestamp last confirmed as of this writing. |
+| 2026-09-11, 14:14 UTC | Sansec's advisory revised again: added process-lineage detail for the `chronyd` build (observed with no cron entry and a PID-1 parent, consistent with a self-initiated rename/relaunch rather than a cron-triggered restart) — see `VULNERABILITY.md` and `file_paths.txt`. |
+| 2026-09-14, 13:27 UTC | **Sansec's advisory revised again with two major new sections.** A **third, distinct post-exploitation toolkit** confirmed: a remote-file-include backdoor edited directly into `vendor/magento/framework/App/View.php`, gated by a cookie (`gl_google_advisor_824808`) disguised as ad-tech tracking, fetching and executing a remote payload via `/tmp/tmp.log` and deleting it immediately after. Separately, an **"execution without the email" chain confirmed**: poisoning via PHP source in the query string of `POST /paypal/transparent/response/`, with observed payloads printing `MGPROOF::`/writing `mgproof717.txt` (proof-of-execution) and `MGKWSIM::` (direct command execution via a `kwc` request parameter) — reaching full RCE without ever rendering the failed-payment email. Page modified timestamp last confirmed as of this writing. |
 
 ## How to keep this current
 
@@ -39,4 +40,4 @@ period:
   iterating.
 - Track patch-adoption milestones too: whether Adobe extends official coverage to older
   versions, whether new exploitation waves target unpatched stores post-disclosure, and
-  whether the second, unrelated attacker's tooling evolves.
+  whether the second and third attackers' tooling evolves further.

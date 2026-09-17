@@ -217,6 +217,22 @@ The vulnerable code lives in Magento's dependency-injection code scanner, specif
 mitigation tooling left a marker comment behind, you can check for it (adjust the
 string to whatever your specific tooling used):
 
+**Also check that a compromise hasn't tampered with a different core file entirely.**
+A third, independently confirmed toolkit (see
+[`VULNERABILITY.md`](VULNERABILITY.md#a-third-distinct-post-exploitation-toolkit-confirmed-2026-09-14))
+edits `vendor/magento/framework/App/View.php` directly to add a backdoor — applying
+Adobe's hotfix to the DI-scanner sink does nothing to detect or remove tampering
+elsewhere in the vendor tree. After patching, it's worth diffing your installed
+`vendor/magento/framework` tree against a pristine copy of the same version pulled
+fresh, not just trusting that `composer install` alone would have caught a hand-edited
+file (it generally will, if your lock file pins exact versions and you force a clean
+reinstall — but verify rather than assume, especially if you're not doing a full clean
+reinstall as part of applying this patch):
+
+```bash
+grep -rn 'gl_google_advisor_824808' vendor/magento/framework/ 2>/dev/null
+```
+
 ```bash
 grep -c 'StyleSmuggler mitigation' \
   setup/src/Magento/Setup/Module/Di/Code/Scanner/ArrayScanner.php

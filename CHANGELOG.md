@@ -6,10 +6,51 @@ expect continued updates as compromise cleanup, secondary-attacker activity, and
 adoption play out.
 
 ## [Unreleased]
-- Watching for: further variants of the second, unrelated web-shell attacker; any
-  additional implant version bumps beyond `chronyd` 2.1.5; expanded Adobe patch
-  coverage for versions below the currently supported floor; whether the community
-  root-cause (directive-signing) framing and Adobe's own fix converge on the same
+- Watching for: further variants of the second, unrelated web-shell attacker or the
+  new third toolkit; any additional implant version bumps beyond `chronyd` 2.1.5;
+  further confirmed detonation chains beyond the two now documented; expanded Adobe
+  patch coverage for versions below the currently supported floor. Sansec's advisory
+  page modified timestamp is confirmed through 2026-09-14 13:27 UTC as of this writing.
+
+## 2026-09-14 — a third toolkit, and execution confirmed without the failed-payment email
+Sansec's advisory was revised again with two major new sections, changing the threat
+model significantly beyond "one implant, one web shell, one email trigger":
+
+- **A third, distinct post-exploitation toolkit confirmed.** Unlike the Rust implant or
+  the second attacker's dropped web shell, this one edits a **core Magento vendor
+  file** (`vendor/magento/framework/App/View.php`) directly to add an on-demand
+  remote-file-include backdoor: it checks for a cookie named
+  `gl_google_advisor_824808` (disguised as ad-tech tracking), base64-decodes its value
+  as a URL, fetches it, writes the response to `/tmp/tmp.log`, executes it, and deletes
+  it immediately after — nothing extra sits on disk between requests. A `pub/media`
+  sweep will never catch this; it requires checking vendor-file integrity directly.
+  Added throughout: new major section in `docs/VULNERABILITY.md`, new IOC block in
+  `iocs/file_paths.txt`, a new YARA rule (`StyleSmuggler_ThirdToolkit_FrameworkRFI`),
+  a new Suricata rule for the gating cookie, a new ModSecurity rule, new evidence-
+  capture and eradication steps in `docs/INCIDENT_RESPONSE.md`, a verification note in
+  `docs/PATCHING.md`, and new checks in both scanners (framework-file content check
+  and transient `/tmp/tmp.log` check) — tested against planted indicators.
+- **"Execution without the email" confirmed** — a second, independent detonation chain
+  for the *original* Rust-implant-adjacent campaign that never renders the
+  failed-payment email at all. Poisoning rides in the query string of `POST
+  /paypal/transparent/response/`; two observed payloads self-identify with fixed-string
+  markers that do **not** match the existing hex-shaped `MG<hex>::` regex: `MGPROOF::`
+  (with a `mgproof717.txt` artefact, apparently a proof-of-execution check) and
+  `MGKWSIM::` (a direct command-execution primitive reachable via a `kwc` request
+  parameter, no email involved anywhere). This means mitigations built around
+  watching/disabling the failed-payment email do not cover this path. Rewrote the
+  "two-stage" framing throughout `docs/VULNERABILITY.md` and the README to stop
+  presenting email-rendering as the only detonation mechanism; added detection for
+  both new markers and the `kwc` parameter to `iocs/`, both scanners, YARA, Suricata,
+  and ModSecurity; added explicit scope-limitation language to
+  `mitigations/README.md` since GraphQL-blocking is irrelevant to this chain.
+- Both scanners re-tested end to end against a scenario combining indicators from all
+  three toolkits plus the execution-without-email markers simultaneously; confirmed
+  correct detection and exit codes for both clean and fully-compromised scenarios.
+- `docs/FAQ.md`, `docs/TIMELINE.md`, `README.md` status table and "what StyleSmuggler
+  actually is" section all updated to reflect three independent toolkits and two
+  confirmed detonation chains rather than one of each.
+
   description over time. Sansec's advisory page modified timestamp is confirmed
   through 2026-09-11 14:14 UTC as of this writing.
 

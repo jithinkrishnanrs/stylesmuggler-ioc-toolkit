@@ -1,10 +1,12 @@
 /*
     StyleSmuggler / CVE-2026-75650 — YARA rules
     Built from published/observed indicators only (strings, paths, C2 hosts, campaign
-    markers). Covers BOTH the Rust implant campaign (gvfsd-user/fc-cache/chronyd) AND
-    the second, unrelated PHP web-shell attacker confirmed 2026-09-07 — these are two
-    separate rule groups for two separate operators using the same entry point.
-    Sources: Sansec advisory (2026-09-05, updated through at least 2026-09-09) + Adobe
+    markers). Covers THREE separate, independently confirmed campaigns using the same
+    entry point: the Rust implant (gvfsd-user/fc-cache/chronyd), the second, unrelated
+    PHP web-shell attacker confirmed 2026-09-07, and a third, framework-level toolkit
+    confirmed 2026-09-14. These are three separate rule groups for three separate
+    operators/toolkits — a match in one group says nothing about the others.
+    Sources: Sansec advisory (2026-09-05, updated through at least 2026-09-14) + Adobe
     APSB26-146 + community IR write-ups. See ../../docs/VULNERABILITY.md.
 
     Usage:
@@ -105,6 +107,24 @@ rule StyleSmuggler_Poisoned_Log_Marker
         $marker
 }
 
+rule StyleSmuggler_ExecutionWithoutEmail_Markers
+{
+    meta:
+        description = "Matches the fixed-string 'MG'-prefixed markers (MGPROOF::, MGKWSIM::) from the execution-without-the-email chain, and the mgproof717.txt artefact filename. These do NOT match the hex-shaped MG<hex>:: rule above - a detection tuned to that shape alone will miss these."
+        source = "Sansec advisory, updated 2026-09-14"
+        reference = "https://sansec.io/research/stylesmuggler-0day"
+        date = "2026-09-14"
+
+    strings:
+        $marker_proof = "MGPROOF::"
+        $marker_kwsim = "MGKWSIM::"
+        $artefact      = "mgproof717.txt"
+        $param         = "kwc="
+
+    condition:
+        any of them
+}
+
 rule StyleSmuggler_SecondAttacker_WebShell
 {
     meta:
@@ -125,4 +145,27 @@ rule StyleSmuggler_SecondAttacker_WebShell
 
     condition:
         any of them
+}
+
+rule StyleSmuggler_ThirdToolkit_FrameworkRFI
+{
+    meta:
+        description = "Matches the THIRD, distinct toolkit's remote-file-include backdoor injected into vendor/magento/framework/App/View.php - a gating cookie name and the transient /tmp/tmp.log include-and-unlink pattern. This is a SEPARATE campaign from both the Rust implant and the second attacker's web shell above. Scan this rule against vendor/magento/framework/App/View.php specifically, or any PHP file if hunting for copies/variants elsewhere."
+        source = "Sansec advisory, updated 2026-09-14"
+        reference = "https://sansec.io/research/stylesmuggler-0day"
+        date = "2026-09-14"
+
+    strings:
+        $cookie_name = "gl_google_advisor_824808"
+        $tmp_artefact = "/tmp/tmp.log"
+        // Loose behavioral pattern: base64_decode of a cookie value used to build a
+        // URL that is then fetched and included. Kept generic since the exact
+        // implementation may be re-obfuscated in a future variant - the cookie name
+        // above is the more reliable literal signature for now.
+        $behavior_1 = "base64_decode($_COOKIE"
+        $behavior_2 = "$_COOKIE['gl_google_advisor_824808']"
+
+    condition:
+        $cookie_name or any of ($behavior_*) or
+        ($tmp_artefact and filesize < 200KB)  // tmp.log alone is too generic; only meaningful combined with a small-file context (e.g. scanning a candidate PHP file, not an arbitrary log sweep)
 }

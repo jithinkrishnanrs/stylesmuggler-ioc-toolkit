@@ -1,7 +1,8 @@
 # StyleSmuggler / CVE-2026-75650 — filesystem, process, and cron indicators
-# Sources: Sansec advisory (updated through 2026-09-07 20:50 UTC) + Adobe APSB26-146 +
-# community IR on confirmed live infections. See docs/VULNERABILITY.md for the full
-# build-by-build comparison and the second, unrelated attacker's technique.
+# Sources: Sansec advisory (updated through at least 2026-09-14 13:27 UTC) + Adobe
+# APSB26-146 + community IR on confirmed live infections. See docs/VULNERABILITY.md for
+# the full build-by-build comparison, the second attacker's technique, and the third,
+# framework-level toolkit.
 
 ## Implant binary and lock files — THREE known builds so far, all believed to be the
 ## same Rust codebase (the Rust implant campaign; a SEPARATE, unrelated PHP web-shell
@@ -113,6 +114,12 @@ X-<12 hex>           # e.g. X-52988DAECE51, X-4427457CBAC9 — observed afternoo
 ## Response marker (proof of execution, not just that the payload was sent)
 MG<20 hex>::<base64 result>::/MG<20 hex>
 # e.g. MG8a5ee8fd94fdb9fc6b50::...::/MG8a5ee8fd94fdb9fc6b50 — hex differs per request, match the shape
+#
+# IMPORTANT: this is NOT the only "MG"-prefixed marker family. The execution-without-
+# email chain (see the THIRD-TOOLKIT section further down) uses fixed-string markers
+# that don't fit the hex-shape regex above: "MGPROOF::" and "MGKWSIM::". A detection
+# tuned only to the hex-shaped MG<hex>:: pattern will miss both — grep for the literal
+# "MGPROOF::" and "MGKWSIM::" strings too, not just the regex.
 
 ## User agents on the exploit requests (never a real browser)
 python-requests 2.15.0      # first wave — note the SPACE, not a slash
@@ -200,6 +207,56 @@ ss6_457cfa2fb7_   # recon probe marker, exact observed value (same hex suffix)
 # Treat grep hits for "ss5_" / "ss6_" followed by 10 hex characters in logs or
 # recovered payloads as belonging to this second attacker's campaign, even if the hex
 # suffix differs from the exact pair above — the shape is the durable signal.
+
+## ================================================================================
+## A THIRD, DISTINCT TOOLKIT (confirmed 2026-09-14) — a remote-file-include backdoor
+## planted directly in a core Magento framework file, independent of both the Rust
+## implant and the second attacker's pub/media web shell. See docs/VULNERABILITY.md.
+## ================================================================================
+
+## Tampered core framework file — check this against a pristine copy from the same
+## Magento/composer version, not just for the cookie string below (an attacker could
+## rename the cookie in a future variant; a diff against a known-good file catches any
+## unauthorized edit to this file, not just this specific one).
+vendor/magento/framework/App/View.php
+# Detection (requires a clean reference copy — e.g. from a fresh `composer install` of
+# the exact same magento/framework version, or your own pre-incident backup/VCS history):
+composer show magento/framework                       # confirm the exact installed version first
+# Then diff the live file against a pristine copy of that same version fetched separately
+# (e.g. into a scratch directory via `composer create-project` or downloaded from
+# packagist.org's source archive for that version):
+diff vendor/magento/framework/App/View.php /path/to/pristine/framework/App/View.php
+
+## Gating cookie for the framework RFI backdoor — deliberately named to look like a
+## Google Analytics/Ads tracking cookie. Presence of this cookie NAME in a request is
+## itself a strong signal; a matching request that also succeeds (i.e., the backdoor is
+## live) additionally causes the /tmp/tmp.log write+include+unlink sequence below.
+gl_google_advisor_824808
+# Detection (access logs / WAF logs — cookie values are rarely logged by default, so
+# this checks for the cookie NAME, which is what most default log formats do capture
+# if they log Cookie headers at all):
+grep -c 'gl_google_advisor_824808' access.log
+
+## Transient artifact from the framework RFI backdoor — written, included, then deleted
+## on every invocation, so it will usually NOT be present between requests. Its
+## momentary existence is still worth checking for during/immediately after a suspected
+## live invocation, and its absence does not mean the backdoor isn't there:
+/tmp/tmp.log
+
+## Second confirmed delivery/execution chain that does NOT require the failed-payment
+## email at all — poisoning rides in the query string of a POST to:
+POST /paypal/transparent/response/?<PHP source directly in the query string>
+# Two distinct self-identifying payloads observed for this chain:
+mgproof717.txt          # written beside the including script; a verification/proof-of-execution payload
+MGPROOF::               # marker printed alongside the PHP version by the mgproof717.txt payload
+MGKWSIM::               # marker printed by a direct command-execution payload
+# The MGKWSIM:: payload executes whatever base64-encoded command arrives in this
+# request parameter — treat ANY request containing "kwc=" against this store as a
+# serious signal, not just ones you can decode and confirm are malicious:
+kwc
+# Detection:
+grep -c 'mgproof717.txt\|MGPROOF::\|MGKWSIM::' var/log/system.log var/report/* 2>/dev/null
+grep -c 'kwc=' access.log
 
 ## Secondary / post-exploitation indicators (not either implant/web-shell itself, but
 ## reported alongside them — check these before declaring a store clean)

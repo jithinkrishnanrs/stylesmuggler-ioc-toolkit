@@ -7,9 +7,12 @@ IMPORTANT: applying Adobe's official patch (see docs/PATCHING.md) stops NEW
 exploitation but does not clean an existing compromise. Run this scanner regardless of
 whether you've patched yet.
 
-Checks for BOTH known campaigns: the Rust-based implant (gvfsd-user/fc-cache/chronyd)
-and the second, unrelated PHP web-shell attacker confirmed 2026-09-07. They are
-independent — clearing one does not mean the other isn't present too.
+Checks for THREE known campaigns using the same entry point: the Rust-based implant
+(gvfsd-user/fc-cache/chronyd), the second, unrelated PHP web-shell attacker confirmed
+2026-09-07, and a third, framework-level toolkit confirmed 2026-09-14 (a
+remote-file-include backdoor in vendor/magento/framework). Also checks for a confirmed
+execution chain that does NOT require the failed-payment email trigger at all. All are
+independent — clearing one does not mean another isn't present too.
 
 Same checks as scripts/stylesmuggler_scan.sh, structured for machine-readable output
 (JSON) so it can feed a SIEM or ticketing pipeline. Detection only — no remediation.
@@ -45,6 +48,16 @@ RESPONSE_MARKER_RE = re.compile(r"MG[0-9a-f]{16,}::")
 SECOND_ATTACKER_MARKER_RE = re.compile(r"ss[56]_[0-9a-f]{10}")
 SECOND_ATTACKER_EXACT_MARKER = "ss5_457cfa2fb7"
 WEBSHELL_AUTH_HEADER_VALUE = "X-Cache-Token: fced27f6d57702565353ecc11722533b"
+# Execution-without-the-email chain (confirmed 2026-09-14) — fixed-string markers,
+# NOT hex-shaped, so they do not match RESPONSE_MARKER_RE above
+MGPROOF_MARKER = "MGPROOF::"
+MGKWSIM_MARKER = "MGKWSIM::"
+MGPROOF_ARTEFACT = "mgproof717.txt"
+# Third, distinct toolkit (confirmed 2026-09-14) — remote-file-include backdoor
+# injected into a core framework file, gated by a cookie disguised as ad-tech tracking
+THIRD_TOOLKIT_COOKIE = "gl_google_advisor_824808"
+THIRD_TOOLKIT_FRAMEWORK_FILE = "vendor/magento/framework/App/View.php"
+THIRD_TOOLKIT_TMP_ARTEFACT = "/tmp/tmp.log"
 PHP_TAG_RE = re.compile(r"<\?php|<\?=")
 C2_IPS_TCP = ["99.84.67.186", "209.141.43.95"]
 C2_IP_UDP = "185.157.160.251"
@@ -381,8 +394,62 @@ def check_poisoned_files(report: ScanReport, magento_root):
                     f"Second-attacker web-shell auth-header value found in {f} — this "
                     f"indicates the dropped web shell was likely INVOKED, not just targeted",
                 )
+            if MGPROOF_MARKER in content:
+                report.hit(
+                    "logs",
+                    f"Execution-without-email proof marker (MGPROOF::) found in {f} — this "
+                    f"chain does NOT require the failed-payment email",
+                )
+            if MGKWSIM_MARKER in content:
+                report.hit(
+                    "logs",
+                    f"Execution-without-email command-shell marker (MGKWSIM::) found in {f} — "
+                    f"CONFIRMED CODE EXECUTION via the kwc parameter, independent of the email chain",
+                )
+            if MGPROOF_ARTEFACT in content:
+                report.hit("logs", f"Reference to {MGPROOF_ARTEFACT} (proof-of-execution artefact) found in {f}")
     if report.hit_count == before:
         report.ok("No injected PHP, trigger headers, execution markers, or second-attacker campaign markers found.")
+
+    # Third, distinct toolkit (confirmed 2026-09-14): a remote-file-include backdoor
+    # injected directly into a core framework file, gated by a cookie disguised as
+    # ad-tech tracking. Does NOT live under pub/media, so the web-shell sweep below
+    # will not catch it — check the framework file's contents directly.
+    framework_view = Path(magento_root) / THIRD_TOOLKIT_FRAMEWORK_FILE
+    if framework_view.is_file():
+        try:
+            fv_content = framework_view.read_text(errors="ignore")
+            if THIRD_TOOLKIT_COOKIE in fv_content:
+                report.hit(
+                    "third_toolkit",
+                    f"Third-toolkit framework RFI backdoor signature ({THIRD_TOOLKIT_COOKIE}) "
+                    f"found in {framework_view} — this is a tampered CORE VENDOR FILE, not a "
+                    f"dropped file; restore from a pristine copy of the same magento/framework "
+                    f"version after evidence capture",
+                )
+            else:
+                report.ok(
+                    "No known third-toolkit signature found in vendor/magento/framework/App/View.php "
+                    "(checked for the published cookie-name string only — a file-integrity diff "
+                    "against a pristine copy is more thorough, see docs/INCIDENT_RESPONSE.md)"
+                )
+        except (OSError, PermissionError):
+            report.info("third_toolkit", f"Could not read {framework_view} (permission denied?)")
+    else:
+        report.info(
+            "third_toolkit",
+            "vendor/magento/framework/App/View.php not found under --magento-root — "
+            "skipping third-toolkit framework-file check",
+        )
+    # Transient artefact from the same backdoor — usually absent between requests
+    # since it's deleted immediately after use, so absence here proves nothing on its own
+    if Path(THIRD_TOOLKIT_TMP_ARTEFACT).exists():
+        report.hit(
+            "third_toolkit",
+            f"Found {THIRD_TOOLKIT_TMP_ARTEFACT} — this is the transient include-then-unlink "
+            f"artefact from the third toolkit's framework RFI backdoor; capture a copy "
+            f"immediately if you can, it will likely be deleted",
+        )
 
     # Second, unrelated attacker's web shell: pub/media should NEVER contain executable
     # PHP on a correctly configured Magento install. Use a broad glob (*.ph*) to also
@@ -401,6 +468,21 @@ def check_poisoned_files(report: ScanReport, magento_root):
             report.ok("No PHP-family files found under pub/media.")
     else:
         report.info("webshell", "pub/media not found under --magento-root — skipping web-shell path check")
+
+    # Execution-without-email proof artefact — written beside whatever including
+    # script planted it, so search the whole webroot rather than a single directory
+    try:
+        mgproof_hits = list(Path(magento_root).glob(f"**/{MGPROOF_ARTEFACT}"))
+        # Cap depth-equivalent cost similar to the bash version's -maxdepth 6; Path.glob
+        # with ** is unbounded, so guard against pathological trees on huge installs
+        for f in mgproof_hits[:50]:
+            report.hit(
+                "logs",
+                f"Found {MGPROOF_ARTEFACT}: {f} — execution-without-email proof-of-execution "
+                f"artefact; the file it sits beside is likely the including script that needs removing",
+            )
+    except (OSError, PermissionError):
+        pass
 
 
 def check_network(report: ScanReport):
@@ -484,7 +566,7 @@ def main():
         home_dirs.extend(glob.glob("/home/*"))
 
     print("StyleSmuggler / CVE-2026-75650 compromise scanner")
-    print("Built from: Sansec advisory (2026-09-05, updated through 2026-09-07) + Adobe APSB26-146 + community IR.")
+    print("Built from: Sansec advisory (2026-09-05, updated through at least 2026-09-14) + Adobe APSB26-146 + community IR.")
     print("Reference:  https://sansec.io/research/stylesmuggler-0day  |  https://helpx.adobe.com/security/products/magento/apsb26-146.html")
     print("Official patch (VULN-39341) exists as of 2026-09-07 — see docs/PATCHING.md. Patching does not clean an existing compromise.")
     print("This is DETECTION ONLY. See docs/INCIDENT_RESPONSE.md before acting on findings.\n")

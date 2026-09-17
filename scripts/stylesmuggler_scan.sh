@@ -14,10 +14,13 @@
 # Magento/site user's home, not root's, and not necessarily the account you're logged
 # in as on shared hosting.
 #
-# This scanner checks for BOTH known campaigns: the Rust-based implant
-# (gvfsd-user/fc-cache/chronyd) and the second, unrelated PHP web-shell attacker
-# confirmed 2026-09-07. They are independent — clearing one does not mean the other
-# isn't present too.
+# This scanner checks for THREE known campaigns using the same entry point: the
+# Rust-based implant (gvfsd-user/fc-cache/chronyd), the second, unrelated PHP
+# web-shell attacker confirmed 2026-09-07, and a third, framework-level toolkit
+# confirmed 2026-09-14 (a remote-file-include backdoor in vendor/magento/framework).
+# It also checks for a confirmed execution chain that does NOT require the
+# failed-payment email trigger at all. All are independent — clearing one does not
+# mean another isn't present too.
 #
 # Sources for every check below: docs/VULNERABILITY.md and iocs/. This is a defensive
 # tool built from published incident reports — it does not exploit anything.
@@ -70,7 +73,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 log "\e[1mStyleSmuggler / CVE-2026-75650 compromise scanner\e[0m"
-log "Built from: Sansec advisory (2026-09-05, updated through 2026-09-07) + Adobe APSB26-146 + community IR."
+log "Built from: Sansec advisory (2026-09-05, updated through at least 2026-09-14) + Adobe APSB26-146 + community IR."
 log "Reference:  https://sansec.io/research/stylesmuggler-0day  |  https://helpx.adobe.com/security/products/magento/apsb26-146.html"
 log "Official patch (VULN-39341) exists as of 2026-09-07 — see docs/PATCHING.md. Patching does not clean an existing compromise."
 log "This is DETECTION ONLY unless --remediate is passed. See docs/INCIDENT_RESPONSE.md.\n"
@@ -327,9 +330,40 @@ if [[ -n "$MAGENTO_ROOT" && -d "$MAGENTO_ROOT" ]]; then
     if grep -rlF 'X-Cache-Token: fced27f6d57702565353ecc11722533b' "$t" 2>/dev/null | grep -q .; then
       hit "Second-attacker web-shell auth-header value found in $t — this indicates the dropped web shell was likely INVOKED, not just targeted"
     fi
+    # Execution-without-the-email chain (confirmed 2026-09-14): fixed-string MG-prefixed
+    # markers that do NOT match the hex-shaped MG<hex>:: regex above
+    if grep -rlF 'MGPROOF::' "$t" 2>/dev/null | grep -q .; then
+      hit "Execution-without-email proof marker (MGPROOF::) found in $t — this chain does NOT require the failed-payment email; see docs/VULNERABILITY.md"
+    fi
+    if grep -rlF 'MGKWSIM::' "$t" 2>/dev/null | grep -q .; then
+      hit "Execution-without-email command-shell marker (MGKWSIM::) found in $t — CONFIRMED CODE EXECUTION via the kwc parameter, independent of the email chain"
+    fi
+    if grep -rlF 'mgproof717.txt' "$t" 2>/dev/null | grep -q .; then
+      hit "Reference to mgproof717.txt (execution-without-email proof artefact) found in $t"
+    fi
   done
   if [[ $FINDINGS -eq 0 ]]; then
     ok "No injected PHP, trigger headers, execution markers, or second-attacker campaign markers found in var/log/system.log or var/report."
+  fi
+
+  # Third, distinct toolkit (confirmed 2026-09-14): a remote-file-include backdoor
+  # injected directly into a core framework file, gated by a cookie disguised as
+  # ad-tech tracking. This does NOT live under pub/media, so the web-shell sweep below
+  # will not catch it — check the framework file's contents directly.
+  FRAMEWORK_VIEW_PHP="$MAGENTO_ROOT/vendor/magento/framework/App/View.php"
+  if [[ -f "$FRAMEWORK_VIEW_PHP" ]]; then
+    if grep -qF 'gl_google_advisor_824808' "$FRAMEWORK_VIEW_PHP" 2>/dev/null; then
+      hit "Third-toolkit framework RFI backdoor signature (gl_google_advisor_824808) found in $FRAMEWORK_VIEW_PHP — this is a tampered CORE VENDOR FILE, not a dropped file; restore from a pristine copy of the same magento/framework version after evidence capture"
+    else
+      ok "No known third-toolkit signature found in vendor/magento/framework/App/View.php (checked for the published cookie-name string only — a file-integrity diff against a pristine copy is more thorough, see docs/INCIDENT_RESPONSE.md)"
+    fi
+  else
+    info "vendor/magento/framework/App/View.php not found under --magento-root — skipping third-toolkit framework-file check"
+  fi
+  # Transient artefact from the same backdoor — usually absent between requests since
+  # it's deleted immediately after use, so absence here proves nothing on its own
+  if [[ -f /tmp/tmp.log ]]; then
+    hit "Found /tmp/tmp.log — this is the transient include-then-unlink artefact from the third toolkit's framework RFI backdoor; capture a copy immediately if you can, it will likely be deleted"
   fi
 
   # Second, unrelated attacker's web shell: pub/media should NEVER contain executable
@@ -346,6 +380,15 @@ if [[ -n "$MAGENTO_ROOT" && -d "$MAGENTO_ROOT" ]]; then
     fi
   else
     info "pub/media not found under --magento-root — skipping web-shell path check"
+  fi
+
+  # Execution-without-email proof artefact — written beside whatever including script
+  # planted it, so search the whole webroot rather than a single directory
+  mapfile -t MGPROOF_FILES < <(find "$MAGENTO_ROOT" -maxdepth 6 -name 'mgproof717.txt' 2>/dev/null)
+  if [[ ${#MGPROOF_FILES[@]} -gt 0 ]]; then
+    for f in "${MGPROOF_FILES[@]}"; do
+      hit "Found mgproof717.txt: $f — execution-without-email proof-of-execution artefact; the file it sits beside is likely the including script that needs removing"
+    done
   fi
 else
   info "No --magento-root given (or path doesn't exist) — skipping log/report content scan and pub/media web-shell check. Re-run with --magento-root /path/to/magento"

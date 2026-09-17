@@ -1,7 +1,9 @@
 # StyleSmuggler / CVE-2026-75650 — Suricata/Snort-compatible network IDS rules
-# Source: Sansec advisory 2026-09-05 (updated through at least 2026-09-09) + Adobe
-# APSB26-146 + community IR. See ../../docs/VULNERABILITY.md. Covers both the
-# Rust-implant campaign and the second, unrelated PHP web-shell attacker (SIDs 7000050+).
+# Source: Sansec advisory 2026-09-05 (updated through at least 2026-09-14) + Adobe
+# APSB26-146 + community IR. See ../../docs/VULNERABILITY.md. Covers the Rust-implant
+# campaign, the second, unrelated PHP web-shell attacker (SIDs 7000050+), the
+# execution-without-the-email chain (SIDs 7000060+), and the third, framework-level
+# toolkit (SIDs 7000070+).
 #
 # Adjust $HOME_NET / $EXTERNAL_NET and SIDs (7000000-7000099 is an arbitrary local range
 # — pick a range that doesn't collide with your existing local.rules) to your environment
@@ -97,3 +99,27 @@ alert http $EXTERNAL_NET any -> $HOME_NET any (msg:"STYLESMUGGLER second-attacke
 # covered by the storeConfig/Store-header rule above) — a literal match is a stronger
 # signal but will miss other campaigns reusing the same tooling with a different ID.
 alert http $EXTERNAL_NET any -> $HOME_NET any (msg:"STYLESMUGGLER second-attacker exact campaign marker (ss5_457cfa2fb7 / ss6_457cfa2fb7_)"; flow:to_server,established; content:"ss5_457cfa2fb7"; sid:7000054; rev:1; classtype:web-application-attack;)
+
+# =====================================================================================
+# EXECUTION WITHOUT THE EMAIL (confirmed 2026-09-14) — a second confirmed chain for
+# the ORIGINAL campaign that does not require rendering the failed-payment email at
+# all. Poisoning rides in the query string of a POST to /paypal/transparent/response/.
+# See ../../docs/VULNERABILITY.md.
+# =====================================================================================
+
+alert http $EXTERNAL_NET any -> $HOME_NET any (msg:"STYLESMUGGLER exploit attempt - PHP source in query string on /paypal/transparent/response/"; flow:to_server,established; http.method; content:"POST"; http.uri; content:"/paypal/transparent/response/"; content:"<?"; sid:7000060; rev:1; classtype:web-application-attack; reference:url,sansec.io/research/stylesmuggler-0day;)
+
+alert http $HOME_NET any -> $EXTERNAL_NET any (msg:"STYLESMUGGLER execution-without-email proof marker (MGPROOF::)"; flow:to_client,established; file.data; content:"MGPROOF::"; sid:7000061; rev:1; classtype:trojan-activity; priority:1;)
+
+alert http $HOME_NET any -> $EXTERNAL_NET any (msg:"STYLESMUGGLER execution-without-email command-shell marker (MGKWSIM::) - CONFIRMED CODE EXECUTION"; flow:to_client,established; file.data; content:"MGKWSIM::"; sid:7000062; rev:1; classtype:trojan-activity; priority:1;)
+
+alert http $EXTERNAL_NET any -> $HOME_NET any (msg:"STYLESMUGGLER direct command-execution parameter (kwc=) observed - likely INVOKED, not just targeted"; flow:to_server,established; content:"kwc="; sid:7000063; rev:1; classtype:trojan-activity; priority:1;)
+
+# =====================================================================================
+# A THIRD, DISTINCT TOOLKIT (confirmed 2026-09-14) — a remote-file-include backdoor
+# injected into vendor/magento/framework/App/View.php, gated by a cookie disguised as
+# ad-tech tracking. Independent of both the Rust implant and the second attacker's web
+# shell. See ../../docs/VULNERABILITY.md.
+# =====================================================================================
+
+alert http $EXTERNAL_NET any -> $HOME_NET any (msg:"STYLESMUGGLER third-toolkit framework-RFI gating cookie observed (gl_google_advisor_824808)"; flow:to_server,established; http.header_names; content:"Cookie"; http.cookie; content:"gl_google_advisor_824808"; sid:7000070; rev:1; classtype:trojan-activity; priority:1; reference:url,sansec.io/research/stylesmuggler-0day;)

@@ -3,6 +3,13 @@
 Use this if `scripts/stylesmuggler_scan.sh` (or the Python equivalent) reports a hit, or
 if you find any of the indicators in [`../iocs/`](../iocs/) by hand.
 
+**At least three independent toolkits are known to exploit this vulnerability**: a
+Rust-based implant (`gvfsd-user`/`fc-cache`/`chronyd`), an unrelated PHP web-shell
+attacker (`pub/media` drop, `ss5`/`ss6` markers), and a third toolkit that tampers with
+a core Magento framework file directly. Finding and cleaning one does not mean the
+others aren't present — work through all of the checks below regardless of what you've
+already found.
+
 **Note on patching:** Adobe's official hotfix (VULN-39341 / APSB26-146, CVE-2026-75650)
 now exists, and must be applied **alongside** Adobe's separate regular September 2026
 update (APSB26-138) — see [`PATCHING.md`](PATCHING.md). Patching stops *new*
@@ -105,6 +112,26 @@ Also preserve:
   `pub/media` should never contain executable PHP on a correctly configured Magento
   store — any hit here is significant regardless of whether you've also found the Rust
   implant.
+- **The third, distinct toolkit's framework tampering** — this one does NOT live under
+  `pub/media`; it edits a core vendor file directly, so the check above will not catch
+  it:
+  ```bash
+  grep -c 'gl_google_advisor_824808' vendor/magento/framework/App/View.php
+  # If your patch/composer tooling can re-fetch a pristine copy of the exact same
+  # magento/framework version, diff the two rather than relying on the grep alone —
+  # a future variant could rename the cookie:
+  diff vendor/magento/framework/App/View.php /path/to/pristine/framework/App/View.php
+  ```
+  Also check for the backdoor's transient artefact immediately, since it deletes
+  itself right after use and may already be gone by the time you look:
+  ```bash
+  ls -la /tmp/tmp.log 2>/dev/null
+  ```
+  And for the execution-without-email chain's own proof artefact, which is NOT deleted
+  after use and can sit anywhere in the webroot next to whatever script planted it:
+  ```bash
+  find . -name 'mgproof717.txt' 2>/dev/null
+  ```
 - The `admin_user` database table, for an unexpected/rogue admin account.
 - Your Redis configuration and connections, if you use Redis for cache/page-cache/
   sessions:
@@ -118,11 +145,16 @@ Also preserve:
 - The poisoned log/report files: `var/log/system.log` and any hit under `var/report/`.
 - Web server access logs covering the suspected compromise window, ideally including
   the raw `X-TRACE-*` / `X-*` trigger header, the `Store:` header (the second
-  attacker's delivery mechanism), and `User-Agent` values. A broader sweep for the
-  delivery attempt itself:
+  attacker's delivery mechanism), the `Cookie` header (for the third toolkit's
+  `gl_google_advisor_824808` gating cookie), and `User-Agent` values. A broader sweep
+  for delivery/execution attempts across all three known campaigns and both confirmed
+  detonation chains:
   ```bash
-  grep -acE 'styles(\[|%5B)|generatorClass|with_resolved|cdnflare' /path/to/access.log
+  grep -acE 'styles(\[|%5B)|generatorClass|with_resolved|cdnflare|MGPROOF::|MGKWSIM::|kwc=|gl_google_advisor_824808' /path/to/access.log
   ```
+  A hit on `MGKWSIM::` or `kwc=` specifically means confirmed or attempted code
+  execution via the execution-without-email chain — treat as high priority regardless
+  of whether the failed-payment email was ever involved.
 - If your incident process supports it and the box is important enough: a full memory
   capture before you touch anything further.
 
@@ -184,7 +216,32 @@ Order matters. Persistence re-adds itself if you kill the process first.
    ```
 6. **Clean the poisoned log/report files** (`var/log/system.log`, `var/report/<hash>`)
    only *after* you've captured the copies you want for evidence.
-7. **Check the Magento database for persistence or tampering** that the exploited site
+7. **Remove the third toolkit's framework tampering and artefacts** — this is
+   independent of both the Rust implant and the second attacker's web shell, and does
+   NOT get cleaned by anything above:
+   ```bash
+   # Restore the tampered core file from a pristine copy of the SAME magento/framework
+   # version rather than hand-editing out the malicious block — you want the whole file
+   # byte-for-byte matching a known-good release, not just the part you noticed:
+   composer show magento/framework   # confirm exact installed version first
+   # then replace vendor/magento/framework/App/View.php with a pristine copy of that
+   # exact version (re-run `composer install --no-cache` after clearing any cached
+   # package archive if you suspect the cache itself could be tampered)
+
+   # Remove the transient artefact if it's still present (it usually won't be —
+   # the backdoor deletes it after every use):
+   rm -f /tmp/tmp.log
+
+   # Remove the execution-without-email proof artefact and inspect whatever script
+   # sits beside it — that neighboring file is likely the actual planted webshell:
+   find . -name 'mgproof717.txt' -print
+   # review the file(s) next to each hit before deleting either
+   ```
+   Also review any request logs for the `kwc` parameter — a hit means the
+   `MGKWSIM::` command-execution primitive was reachable and possibly invoked;
+   treat this the same as confirmed RCE regardless of whether you can identify what
+   command was run.
+8. **Check the Magento database for persistence or tampering** that the exploited site
    user could have written directly:
    ```sql
    SELECT user_id, username, email, created, logdate, is_active

@@ -78,6 +78,34 @@ DNS rather than in the HTTP response, so it won't show up in ordinary response-b
 monitoring. Practical implication: cleaning up the Rust implant does not mean your store
 is clean; check for stray PHP under `pub/media` too (`find pub/media -name '*.php'`).
 
+### Is there a third attacker/toolkit too?
+
+Yes, confirmed by Sansec on September 14, 2026. This one is different in kind from the
+other two: instead of dropping a new file, it directly **edits a core Magento vendor
+file** (`vendor/magento/framework/App/View.php`) to add an on-demand remote-file-include
+backdoor. It checks incoming requests for a cookie named `gl_google_advisor_824808`
+(deliberately named to look like ad-tech tracking), base64-decodes the cookie's value
+as a URL, fetches that URL, writes the response to `/tmp/tmp.log`, executes it, and then
+deletes it — so there's usually nothing extra sitting on disk between requests except
+the one tampered line in a vendor file. A `pub/media` sweep or a check for new files
+won't catch this; you need to check the framework file's contents directly (or diff it
+against a pristine copy of the same version) — see
+[`../iocs/file_paths.txt`](../iocs/file_paths.txt) and
+[`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md).
+
+### Do I need to worry about the failed-payment email at all if I've blocked it?
+
+Not by itself, no — but blocking or disabling that email is not sufficient on its own
+either way, because Sansec also confirmed a **second detonation chain that doesn't use
+the email at all.** It poisons via a `POST` to `/paypal/transparent/response/` with PHP
+source directly in the query string, and the resulting payload can execute commands
+directly through a `kwc` request parameter (look for the markers `MGPROOF::` or
+`MGKWSIM::` in your logs) with no email rendering involved anywhere in the chain. If
+your mitigation strategy was built around watching or disabling the failed-payment
+email specifically, it does not cover this path — you need the actual patch (or the
+broader mitigations in [`../mitigations/`](../mitigations/)), not an email-specific
+workaround.
+
 ### How do I check if I'm compromised?
 
 Run [`../scripts/stylesmuggler_scan.sh`](../scripts/stylesmuggler_scan.sh) or
@@ -88,7 +116,9 @@ store. At minimum, manually check:
 crontab -l | grep -iE 'gvfsd|\.kw_|fc-cache|chronyd'
 ps -eo pid,user,comm,args | grep -iE 'kworker|fc-cache|chronyd'
 grep -ril 'x_trace_' var/report/ var/log/system.log
-find pub/media -name '*.php'
+find pub/media -name '*.ph*'
+grep -c 'gl_google_advisor_824808' vendor/magento/framework/App/View.php
+grep -c 'MGPROOF::\|MGKWSIM::' var/log/system.log
 ```
 
 See [`../iocs/`](../iocs/) for the full, current indicator list.
@@ -153,8 +183,9 @@ Don't just delete the process and move on. See
 [`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md) for the full, ordered playbook: preserve
 evidence, remove persistence before killing the process, then flush sessions, rotate the
 Magento encryption key and every credential in `app/etc/env.php`, and check for rogue
-admin accounts and dropped webshells (both the Rust implant's and the unrelated second
-attacker's) before considering the store clean.
+admin accounts and dropped webshells (the Rust implant's, the unrelated second
+attacker's, and the third toolkit's tampered framework file) before considering the
+store clean.
 
 ### Where can I get the authoritative, up-to-date information?
 
