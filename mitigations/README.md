@@ -65,6 +65,12 @@ for further updates.
    Cloudflare), plus the PHP-execution-blocking config (worth keeping even after
    patching, as general hardening), plus ModSecurity if available for POST-body
    inspection.
+   - **If your storefront genuinely needs public GraphQL** (this is common with
+     headless/lightweight frontends such as Hyvä, which route storefront rendering
+     through GraphQL), do not block the endpoint outright — use "Option B" in the
+     nginx/Apache configs (scoped to requests carrying a `styles` argument) or an
+     equivalent targeted WAF rule instead, and test thoroughly that legitimate
+     GraphQL traffic still works before relying on it.
 4. Add the fail2ban filter as a reactive backstop, and consider the
    [`disable_functions` hardening](php_disable_functions.md) as an additional layer
    independent of the delivery vector — test on staging first, since it can affect

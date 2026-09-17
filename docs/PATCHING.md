@@ -53,6 +53,14 @@ directly rather than assuming from the shorthand ranges above. If you're on an E
 line not listed in Adobe's affected-versions table at all, don't assume you're safe by
 omission — you're simply not something Adobe is tracking a fix for; see below.
 
+**This table itself has already changed once.** Corroborating coverage reports that
+Adobe's Experience League knowledge-base article for this hotfix was updated on
+September 11, 2026 to *expand* hotfix compatibility beyond what was originally listed.
+Treat the ranges above as a snapshot from the original bulletin, not Adobe's current,
+authoritative word — check
+[Adobe's own KB article](https://experienceleague.adobe.com/en/docs/commerce-knowledge-base/kb/announcements/commerce-apsb26-146)
+directly before concluding your version isn't covered.
+
 If your store runs Magento Open Source 2.4.5 or older, **Adobe is not shipping you a
 fix**, even though you are just as exploitable as a supported install. Options:
 

@@ -19,7 +19,7 @@ on **September 5, 2026**, with in-the-wild exploitation confirmed from
 > generates the attack payload. If you are looking for that, you are in the wrong repo —
 > go patch and hunt instead.
 
-## Status as of this writing (2026-09-14)
+## Status as of this writing (2026-09-16)
 
 | | |
 |---|---|
@@ -30,12 +30,12 @@ on **September 5, 2026**, with in-the-wild exploitation confirmed from
 | Also required | **APSB26-138** (Adobe's regular September 2026 Commerce update, isolated patch `249-2026-09-001-CE`, released 2026-09-08). Adobe states VULN-39341 must be applied **in addition to** this, not instead of it. |
 | CVSS | **10.0** (3.1 and 4.0) — Critical. Full 3.1 vector: `AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H` |
 | CWE | CWE-1336, Improper Neutralization of Special Elements Used in a Template Engine |
-| **CISA KEV** | **Added to CISA's Known Exploited Vulnerabilities catalog 2026-09-08.** Federal civilian executive branch (FCEB) remediation deadline: **2026-09-11**. Not just a Magento-community problem — this is now a federally-tracked, actively-exploited RCE. |
+| **CISA KEV** | **Added to CISA's Known Exploited Vulnerabilities catalog 2026-09-08.** Federal civilian executive branch (FCEB) remediation deadline: **2026-09-11**. CISA's entry also flags this as requiring forensic/IR triage, with known ransomware-campaign use listed as "Unknown." Not just a Magento-community problem — this is now a federally-tracked, actively-exploited RCE. |
 | Official patch | **Shipped.** Hotfix `VULN-39341`. **Coverage is not universal** — see the table below. |
 | Authentication required | **None** — unauthenticated |
-| Public exploit code | None known/published as of this writing — all observed exploitation is custom attacker tooling. Treat as temporary, not a reason to deprioritize patching. |
+| Public exploit code | No *official* PoC from Adobe/Sansec, but corroborating coverage notes a public GitHub repo (created ~Sept 8) describing itself as a research lab reproduction of the full chain — "no public exploit code" is weaker than it sounds. See [`docs/VULNERABILITY.md`](docs/VULNERABILITY.md). |
 | Affected versions | Reproduced by Sansec on clean Magento Open Source 2.4.7, 2.4.8, 2.4.9; first confirmed victim ran 2.4.6-p15 fully patched (on prior patches) |
-| Exploitation | Active since 2026-09-04 22:20 UTC; continued through patch release; at least **three independent toolkits** confirmed exploiting the same entry point as of 2026-09-14. Third-party WAF telemetry (Imperva) reports observed targets skew retail (~39.5%), lifestyle (~19.5%), and healthcare (~17.9%) — a snapshot of one vendor's visibility, not a claim about the full population of vulnerable stores. |
+| Exploitation | Active since 2026-09-04 22:20 UTC; continued through patch release; at least **three independent toolkits** confirmed exploiting the same entry point as of 2026-09-14. One exploit-tracking network reports **500+ distinct source IPs** since Sept 9. Third-party WAF telemetry (Imperva) reports observed targets skew retail (~39.5%), lifestyle (~19.5%), and healthcare (~17.9%) — snapshots of individual vendors' visibility, not a claim about the full population of vulnerable stores. |
 | Known Rust-implant variants | `[kworker/u:8:0]` (Sept 4) → `fc-cache` v2.1.4 (Sept 6) → `chronyd` v2.1.5 (Sept 7) — same operator, same agent ID, versions incrementing. The `chronyd` build has been observed self-relaunching with no cron entry and a PID-1 parent. |
 | Second, unrelated attacker | PHP web shell in `pub/media/catalog/product/cache/`, preceded by a DNS-exfiltrating recon probe — independent of the Rust implant, confirmed 2026-09-07 |
 | **Third, distinct toolkit** | **Confirmed 2026-09-14.** A remote-file-include backdoor edited directly into the core framework file `vendor/magento/framework/App/View.php`, gated by a cookie (`gl_google_advisor_824808`) disguised as ad-tech tracking. Fetches and executes a remote payload on demand, then deletes the transient file — nothing sits on disk between requests except the one tampered line in a vendor file. |

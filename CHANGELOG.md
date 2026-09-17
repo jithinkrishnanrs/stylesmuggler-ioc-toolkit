@@ -9,8 +9,51 @@ adoption play out.
 - Watching for: further variants of the second, unrelated web-shell attacker or the
   new third toolkit; any additional implant version bumps beyond `chronyd` 2.1.5;
   further confirmed detonation chains beyond the two now documented; expanded Adobe
-  patch coverage for versions below the currently supported floor. Sansec's advisory
-  page modified timestamp is confirmed through 2026-09-14 13:27 UTC as of this writing.
+  patch coverage for versions below the currently supported floor; independent
+  confirmation (beyond a single vendor's own fleet telemetry) of the GIF+PHP polyglot
+  mechanism proposed for the customer-custom-options vector. Sansec's advisory page
+  modified timestamp is confirmed through 2026-09-16 06:42 UTC as of this writing.
+
+## 2026-09-16 — plausible mechanism for the custom-options vector, scale telemetry, KEV metadata
+Sansec's own advisory page was revised again (modified timestamp confirmed
+2026-09-16 06:42 UTC), but its table of contents is unchanged from the Sept 14
+revision and no specific new Sansec-authored content could be distinguished at this
+pass — noted honestly in `docs/TIMELINE.md` and the sources list rather than
+overclaiming. Separately, broader corroborating coverage surfaced several items
+worth adding:
+
+- **A plausible technical mechanism for the customer-custom-options delivery
+  vector**, per one independent vendor's own write-up (not confirmed by Sansec):
+  a GIF+PHP polyglot uploaded through the guest custom-option file-upload endpoint,
+  which checks file type with a **blacklist rather than a whitelist**, followed by
+  an "arbitrary instantiation gadget" that treats the uploaded file's path as a
+  trusted class/include reference. Added to `docs/VULNERABILITY.md` with an explicit
+  single-source caveat and a note that the upload endpoint itself is "ordinary,
+  intended Magento behavior" — the gap is in what happens to the path afterward.
+- **Softened the "no public exploit code" claim.** Corroborating coverage reports a
+  public GitHub repository (created ~Sept 8) describing itself as a lab reproduction
+  of the full unauthenticated chain for research purposes. This repo does not name
+  or link it, to avoid pointing readers at a working trigger, but updated the
+  language in `docs/VULNERABILITY.md` and `README.md` to stop implying no such thing
+  exists anywhere publicly.
+- **Scale telemetry**: one exploit-tracking network (CrowdSec) reports 500+ distinct
+  source IPs sending matching requests since Sept 9 — added as context in
+  `docs/VULNERABILITY.md` and the README status table, clearly separated from the
+  specific, individually-listed source addresses in `iocs/ips.txt`.
+- **CISA KEV entry metadata**: the catalog entry also flags forensic/IR triage as
+  required and lists ransomware-campaign use as "Unknown" — added to the README and
+  `docs/VULNERABILITY.md`.
+- **Adobe's hotfix compatibility was reportedly expanded** via a September 11
+  Experience League KB update, beyond the version table in the original bulletin —
+  added as an explicit caveat in `docs/PATCHING.md` pointing readers to Adobe's KB
+  directly rather than trusting any static table's exact cutoff, including this
+  repo's own.
+- Added a note to `mitigations/README.md` for stores that genuinely need public
+  GraphQL (common with headless frontends such as Hyvä): use the scoped,
+  `styles`-argument-only blocking option instead of blocking the endpoint outright.
+- No scanner code changes this round — none of the above are new host-level or
+  log-level indicators the scanner could check for; they're context, sourcing
+  caveats, and a mitigation-scoping note.
 
 ## 2026-09-14 — a third toolkit, and execution confirmed without the failed-payment email
 Sansec's advisory was revised again with two major new sections, changing the threat

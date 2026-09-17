@@ -20,7 +20,7 @@ external tooling (Velociraptor, a Sigma-compatible SIEM/EDR) rather than these s
 ## Provenance
 
 Compiled from Sansec's advisory (published 2026-09-05, continuously updated; page
-modified timestamp confirmed through at least 2026-09-14 13:27 UTC), Adobe's Security
+modified timestamp confirmed through at least 2026-09-16 06:42 UTC), Adobe's Security
 Bulletins APSB26-146 and APSB26-138, and community incident-response reporting on
 independently confirmed live infections. See `../docs/VULNERABILITY.md` for full
 sourcing and caveats.
